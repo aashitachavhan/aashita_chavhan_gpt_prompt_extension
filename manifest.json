@@ -1,26 +1,26 @@
 {
   "manifest_version": 3,
-  "name": "GPT Prompt Enhancer",
+  "name": "ChatGPT Prompt Enhancer",
   "version": "1.0",
-  "description": "Enhance prompts with role-based Gemini integration.",
-  "permissions": ["scripting", "storage", "activeTab"],
+  "description": "Generate better prompts for ChatGPT using role-based input.",
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
   "action": {
-    "default_popup": "popup.html",
-    "default_title": "GPT Prompt Enhancer"
+    "default_popup": "index.html",
+    "default_icon": {
+      "16": "icon.png"
+    }
   },
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["*://chat.openai.com/*"],
-      "js": ["content.js"]
+      "matches": ["https://chat.openai.com/*"],
+      "js": ["contentScript.js"]
     }
   ],
-  "icons": {
-    "16": "icons/icon-48.png",
-    "32": "icons/icon-48.png",
-    "48": "icons/icon-48.png",
-    "128": "icons/icon-48.png"
-  }
+  "host_permissions": [
+    "https://chat.openai.com/",
+    "https://generativelanguage.googleapis.com/*"
+  ]
 }
