@@ -57,7 +57,7 @@ export default function Popup() {
 
   return (
     <div className="p-4 w-80 bg-white text-black">
-      <h2 className="text-lg font-bold mb-4 text-center">ChatGPT Prompt Enhancer</h2>
+      <h2 className="text-lg font-bold mb-4 text-center ">ChatGPT Prompt Enhancer</h2>
       
       <label className="block mb-2 font-bold">Role</label>
       <select
