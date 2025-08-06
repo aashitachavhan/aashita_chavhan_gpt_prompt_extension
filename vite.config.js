@@ -1,8 +1,24 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import copy from 'rollup-plugin-copy'
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    copy({
+      targets: [
+        { src: 'src/content/contentScript.js', dest: 'dist' }, // <--- Copy content script
+      ],
+      hook: 'writeBundle'
+    })
+  ],
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html'
+      }
+    }
+  }
 })

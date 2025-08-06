@@ -1,175 +1,251 @@
-console.log("ChatGPT Prompt Enhancer: Content script loaded!");
+console.log("🚀 ChatGPT Prompt Enhancer: Content script loaded!");
+console.log("Current URL:", window.location.href);
 
-// Simple function to inject the enhance icon
+// Function to find ChatGPT input element
+function findChatGPTInput() {
+  // Try multiple selectors for different ChatGPT versions
+  const selectors = [
+    '#prompt-textarea',
+    'textarea[data-id="root"]',
+    'textarea[placeholder*="Message"]',
+    'textarea[placeholder*="Send a message"]',
+    'div[contenteditable="true"]',
+    'textarea',
+    'input[type="text"]'
+  ];
+
+  for (const selector of selectors) {
+    const element = document.querySelector(selector);
+    if (element) {
+      console.log(`✅ Found input with selector: ${selector}`, element);
+      return element;
+    }
+  }
+
+  console.log("❌ No input element found");
+  return null;
+}
+
+// Function to inject the enhance icon
 function injectEnhanceIcon() {
-  // Remove existing icon if it exists
+  // Remove existing icon
   const existingIcon = document.getElementById("enhance-icon");
   if (existingIcon) {
     existingIcon.remove();
+    console.log("🗑️ Removed existing icon");
   }
 
-  // Find the ChatGPT textarea
-  const textarea = document.querySelector('textarea[data-id="root"]') ||
-                  document.querySelector('textarea[placeholder*="Message"]') ||
-                  document.querySelector('textarea[placeholder*="Send a message"]') ||
-                  document.querySelector('textarea');
-
-  if (!textarea) {
-    console.log("ChatGPT textarea not found");
+  // Find input element
+  const inputElement = findChatGPTInput();
+  if (!inputElement) {
+    console.log("❌ Cannot inject icon - no input element found");
     return false;
   }
+
+  console.log("🎯 Input element found, creating icon...");
 
   // Create the enhance icon
   const icon = document.createElement("button");
   icon.id = "enhance-icon";
   icon.innerHTML = "✨";
   icon.title = "Enhance Prompt";
+  
+  // Use the same styling approach that worked in the test
   icon.style.cssText = `
-    position: absolute;
-    z-index: 10000;
-    right: 70px;
-    bottom: 10px;
-    padding: 8px 12px;
-    border-radius: 8px;
-    background: #10a37f;
-    color: white;
-    border: none;
-    cursor: pointer;
-    font-size: 16px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    transition: all 0.2s ease;
+    position: fixed !important;
+    top: 50% !important;
+    right: 20px !important;
+    transform: translateY(-50%) !important;
+    padding: 12px !important;
+    border-radius: 50% !important;
+    background: #10a37f !important;
+    color: white !important;
+    border: none !important;
+    cursor: pointer !important;
+    font-size: 20px !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
+    transition: all 0.2s ease !important;
+    width: 50px !important;
+    height: 50px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    z-index: 999999 !important;
+    opacity: 0.9 !important;
   `;
 
   // Add hover effects
   icon.addEventListener("mouseenter", () => {
-    icon.style.background = "#0d8a6f";
-    icon.style.transform = "scale(1.05)";
+    icon.style.background = "#0d8a6f !important";
+    icon.style.transform = "translateY(-50%) scale(1.1) !important";
+    icon.style.opacity = "1 !important";
   });
 
   icon.addEventListener("mouseleave", () => {
-    icon.style.background = "#10a37f";
-    icon.style.transform = "scale(1)";
+    icon.style.background = "#10a37f !important";
+    icon.style.transform = "translateY(-50%) scale(1) !important";
+    icon.style.opacity = "0.9 !important";
   });
 
   // Handle icon click
-  icon.addEventListener("click", () => {
+  icon.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    console.log("✨ Enhance icon clicked!");
+    
     const userPrompt = prompt("Enter the idea or rough prompt you'd like to refine:");
-    if (userPrompt) {
-      console.log("Sending enhance request:", userPrompt);
+    if (userPrompt && userPrompt.trim()) {
+      console.log("📝 User prompt:", userPrompt);
+      
+      // Show loading state
+      icon.innerHTML = "⏳";
+      icon.style.background = "#666 !important";
       
       chrome.runtime.sendMessage({
         type: "ENHANCE_PROMPT",
-        payload: userPrompt
+        payload: userPrompt.trim()
       }, (response) => {
-        console.log("Received response:", response);
+        // Reset icon
+        icon.innerHTML = "✨";
+        icon.style.background = "#10a37f !important";
+        
+        console.log("📨 Received response:", response);
+        
+        if (chrome.runtime.lastError) {
+          console.error("❌ Runtime error:", chrome.runtime.lastError);
+          alert("Error communicating with extension background script");
+          return;
+        }
+        
         if (response && response.prompt) {
-          // Find the current textarea
-          const currentTextarea = document.querySelector('textarea[data-id="root"]') ||
-                                document.querySelector('textarea[placeholder*="Message"]') ||
-                                document.querySelector('textarea');
+          // Find the current input element again (might have changed)
+          const currentInput = findChatGPTInput();
           
-          if (currentTextarea) {
-            currentTextarea.value = response.prompt;
-            currentTextarea.dispatchEvent(new Event("input", { bubbles: true }));
-            currentTextarea.focus();
-            console.log("Enhanced prompt injected!");
+          if (currentInput) {
+            // Handle different input types
+            if (currentInput.tagName === 'TEXTAREA' || currentInput.tagName === 'INPUT') {
+              currentInput.value = response.prompt;
+              currentInput.dispatchEvent(new Event("input", { bubbles: true }));
+              currentInput.dispatchEvent(new Event("change", { bubbles: true }));
+            } else if (currentInput.contentEditable === 'true') {
+              currentInput.textContent = response.prompt;
+              currentInput.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+            
+            currentInput.focus();
+            console.log("✅ Enhanced prompt injected successfully!");
+            
+            // Show success feedback
+            icon.innerHTML = "✅";
+            setTimeout(() => {
+              icon.innerHTML = "✨";
+            }, 2000);
+          } else {
+            console.error("❌ Could not find input to inject enhanced prompt");
+            alert("Could not find input field to insert enhanced prompt");
           }
+        } else {
+          console.error("❌ Invalid response format:", response);
+          alert("Failed to enhance prompt - invalid response");
         }
       });
     }
   });
 
-  // Find the textarea's parent and position the icon
-  let parent = textarea.parentElement;
-  while (parent && parent !== document.body) {
-    const style = window.getComputedStyle(parent);
-    if (style.position === 'relative' || style.position === 'absolute') {
-      break;
-    }
-    parent = parent.parentElement;
-  }
-
-  if (!parent) {
-    parent = textarea.parentElement;
-  }
-
-  parent.style.position = "relative";
-  parent.appendChild(icon);
-
-  console.log("✨ Enhance icon injected successfully!");
+  // Add to page
+  document.body.appendChild(icon);
+  console.log("🎉 Enhance icon successfully added to page!");
+  
   return true;
 }
 
-// Function to retry injection
-function retryInjection() {
+// Main injection function with retries
+function attemptInjection() {
   let attempts = 0;
   const maxAttempts = 10;
-
+  
   const tryInject = () => {
     attempts++;
-    console.log(`Attempt ${attempts} to inject icon...`);
+    console.log(`🔄 Injection attempt ${attempts}/${maxAttempts}`);
     
     if (injectEnhanceIcon()) {
-      console.log("Icon injection successful!");
+      console.log("🎯 Icon injection successful!");
       return;
     }
     
     if (attempts < maxAttempts) {
-      setTimeout(tryInject, 1000);
+      const delay = Math.min(1000 * attempts, 5000); // Progressive delay
+      console.log(`⏱️ Retrying in ${delay}ms...`);
+      setTimeout(tryInject, delay);
     } else {
-      console.log("Failed to inject icon after", maxAttempts, "attempts");
+      console.log("❌ Failed to inject icon after all attempts");
+      console.log("🔍 Debug info:");
+      console.log("- Textareas found:", document.querySelectorAll('textarea').length);
+      console.log("- Contenteditable elements:", document.querySelectorAll('[contenteditable="true"]').length);
+      console.log("- All input elements:", document.querySelectorAll('input').length);
     }
   };
-
-  tryInject();
+  
+  // Start first attempt after a short delay
+  setTimeout(tryInject, 500);
 }
 
-// Initial injection attempt
-retryInjection();
+// Initialize when page is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', attemptInjection);
+} else {
+  attemptInjection();
+}
 
-// Also try injection when the page loads
-window.addEventListener("load", () => {
-  setTimeout(retryInjection, 1000);
+// Handle navigation changes (ChatGPT is a SPA)
+let currentUrl = location.href;
+const navigationObserver = new MutationObserver(() => {
+  if (location.href !== currentUrl) {
+    currentUrl = location.href;
+    console.log("🔄 Navigation detected:", currentUrl);
+    setTimeout(attemptInjection, 1000);
+  }
 });
 
-// Try injection when URL changes (for SPA navigation)
-let lastUrl = location.href;
-new MutationObserver(() => {
-  const url = location.href;
-  if (url !== lastUrl) {
-    lastUrl = url;
-    console.log("URL changed, retrying injection...");
-    setTimeout(retryInjection, 1000);
-  }
-}).observe(document, { subtree: true, childList: true });
-
-// Listen for dynamic content changes
-const observer = new MutationObserver((mutations) => {
+// Watch for new elements being added (like when starting a new chat)
+const contentObserver = new MutationObserver((mutations) => {
+  let shouldRetry = false;
+  
   for (const mutation of mutations) {
     if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-      // Check if any new textareas were added
-      const hasNewTextarea = Array.from(mutation.addedNodes).some(node => {
+      for (const node of mutation.addedNodes) {
         if (node.nodeType === Node.ELEMENT_NODE) {
-          return node.querySelector('textarea') || node.tagName === 'TEXTAREA';
+          // Check if new input elements were added
+          if (node.matches && (
+            node.matches('textarea') ||
+            node.matches('[contenteditable="true"]') ||
+            node.matches('input') ||
+            node.querySelector('textarea') ||
+            node.querySelector('[contenteditable="true"]') ||
+            node.querySelector('input')
+          )) {
+            shouldRetry = true;
+            break;
+          }
         }
-        return false;
-      });
-      
-      if (hasNewTextarea && !document.getElementById("enhance-icon")) {
-        console.log("New textarea detected, injecting icon...");
-        setTimeout(retryInjection, 500);
       }
+      if (shouldRetry) break;
     }
+  }
+  
+  // Only retry if we don't already have an icon
+  if (shouldRetry && !document.getElementById("enhance-icon")) {
+    console.log("🆕 New input elements detected, retrying injection...");
+    setTimeout(attemptInjection, 1000);
   }
 });
 
-// Start observing when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    observer.observe(document.body, { childList: true, subtree: true });
-  });
-} else {
-  observer.observe(document.body, { childList: true, subtree: true });
-}
+// Start observers
+setTimeout(() => {
+  navigationObserver.observe(document, { subtree: true, childList: true });
+  contentObserver.observe(document.body, { childList: true, subtree: true });
+  console.log("👁️ Observers started");
+}, 1000);
 
-console.log("ChatGPT Prompt Enhancer: Content script setup complete!");
+console.log("🔧 ChatGPT Prompt Enhancer setup complete!");

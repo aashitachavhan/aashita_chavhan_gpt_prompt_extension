@@ -1,3 +1,4 @@
+console.log("BG loaded")
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "GENERATE_PROMPT") {
     const { role, input } = message.payload;
