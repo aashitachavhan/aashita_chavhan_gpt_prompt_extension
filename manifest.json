@@ -11,12 +11,12 @@
     }
   },
   "background": {
-    "service_worker": "src/background/background.js"
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://chat.openai.com/*"],
-      "js": ["src/content/contentScript.js"]
+      "matches": ["https://chat.openai.com/*", "https://chatgpt.com/*"],
+      "js": ["contentScript.js"]
     }
   ],
   "host_permissions": [
