@@ -9,7 +9,8 @@ export default defineConfig({
     tailwindcss(),
     copy({
       targets: [
-        { src: 'src/content/contentScript.js', dest: 'dist' }, // <--- Copy content script
+        { src: 'src/content/contentScript.js', dest: 'dist' },
+        { src: 'src/background/background.js', dest: 'dist' }, // <--- Copy content script
       ],
       hook: 'writeBundle'
     })

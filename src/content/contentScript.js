@@ -25,86 +25,100 @@ function findChatGPTInput() {
   return null;
 }
 
-// Create in-page popup for prompt enhancement
-function createInPagePopup() {
-  const popup = document.createElement('div');
-  popup.id = 'enhance-popup';
-  popup.style.cssText = `
+// Create loading indicator
+function createLoadingIndicator() {
+  const indicator = document.createElement('div');
+  indicator.id = 'enhance-loading';
+  indicator.style.cssText = `
     position: fixed !important;
-    top: 50% !important;
-    left: 50% !important;
-    transform: translate(-50%, -50%) !important;
-    background: white !important;
-    border-radius: 12px !important;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
-    border: 1px solid #e5e7eb !important;
-    z-index: 999999 !important;
-    padding: 0 !important;
-    min-width: 400px !important;
-    max-width: 500px !important;
-    display: none !important;
+    top: 20px !important;
+    right: 20px !important;
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+    color: white !important;
+    padding: 12px 16px !important;
+    border-radius: 8px !important;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    z-index: 999999 !important;
+    display: none !important;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
   `;
-
-  popup.innerHTML = `
-    <div style="background: linear-gradient(135deg, #667eea 50%); color: white; padding: 16px; border-radius: 12px 12px 0 0; display: flex; justify-content: space-between; align-items: center;">
-      <h3 style="margin: 0; font-size: 16px; font-weight: 600;">✨ Enhance Your Prompt</h3>
-      <button id="close-popup" style="background: rgba(255,255,255,0.2); border: none; color: white; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;">×</button>
-    </div>
-    <div style="padding: 20px;">
-      <div style="margin-bottom: 16px;">
-        <label style="display: block; font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em;">Current Role</label>
-        <div id="current-role" style="background: #f3f4f6; padding: 8px 12px; border-radius: 6px; font-size: 14px; color: #1f2937; border: 1px solid #d1d5db;">Loading...</div>
-      </div>
-      <div style="margin-bottom: 16px;">
-        <label style="display: block; font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em;">Your Prompt</label>
-        <textarea id="prompt-input" placeholder="Enter your prompt idea..." style="width: 100%; height: 80px; padding: 12px; border: 2px solid #d1d5db; border-radius: 8px; font-size: 14px; resize: none; font-family: inherit; box-sizing: border-box;" maxlength="500"></textarea>
-        <div style="text-align: right; font-size: 11px; color: #6b7280; margin-top: 4px;">
-          <span id="char-count">0</span>/500
-        </div>
-      </div>
-      <div style="display: flex; gap: 8px;">
-        <button id="enhance-btn" style="flex: 1; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; padding: 12px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px; transition: all 0.2s ease;">
-          🚀 Enhance Prompt
-        </button>
-        <button id="cancel-btn" style="background: #6b7280; color: white; border: none; padding: 12px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px; transition: all 0.2s ease;">
-          Cancel
-        </button>
-      </div>
-      <div id="loading-state" style="display: none; text-align: center; margin-top: 16px; padding: 16px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
-        <div style="display: inline-block; width: 20px; height: 20px; border: 2px solid #cbd5e1; border-top: 2px solid #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px;"></div>
-        <span style="color: #64748b; font-size: 14px;">Enhancing your prompt...</span>
-      </div>
+  
+  indicator.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <div style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid white; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+      <span>Enhancing prompt...</span>
     </div>
     <style>
       @keyframes spin {
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
       }
-      #enhance-btn:hover {
-        transform: translateY(-1px) !important;
-        box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3) !important;
-      }
-      #cancel-btn:hover {
-        background: #4b5563 !important;
-      }
-      #close-popup:hover {
-        background: rgba(255,255,255,0.3) !important;
-      }
     </style>
   `;
+  
+  document.body.appendChild(indicator);
+  return indicator;
+}
 
-  document.body.appendChild(popup);
-  return popup;
+// Show success message
+function showSuccessMessage() {
+  const message = document.createElement('div');
+  message.style.cssText = `
+    position: fixed !important;
+    top: 20px !important;
+    right: 20px !important;
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+    color: white !important;
+    padding: 12px 16px !important;
+    border-radius: 8px !important;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    z-index: 999999 !important;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    transform: translateY(-20px) !important;
+    opacity: 0 !important;
+    transition: all 0.3s ease !important;
+  `;
+  
+  message.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span>✅</span>
+      <span>Prompt enhanced successfully!</span>
+    </div>
+  `;
+  
+  document.body.appendChild(message);
+  
+  // Animate in
+  setTimeout(() => {
+    message.style.transform = 'translateY(0)';
+    message.style.opacity = '1';
+  }, 100);
+  
+  // Remove after 3 seconds
+  setTimeout(() => {
+    message.style.transform = 'translateY(-20px)';
+    message.style.opacity = '0';
+    setTimeout(() => {
+      if (message.parentNode) {
+        message.parentNode.removeChild(message);
+      }
+    }, 300);
+  }, 3000);
 }
 
 // Function to inject the enhance icon near input
 function injectEnhanceIcon() {
   // Remove existing elements
   const existingIcon = document.getElementById("enhance-icon");
-  const existingPopup = document.getElementById("enhance-popup");
+  const existingLoading = document.getElementById("enhance-loading");
   if (existingIcon) existingIcon.remove();
-  if (existingPopup) existingPopup.remove();
+  if (existingLoading) existingLoading.remove();
 
   const inputElement = findChatGPTInput();
   if (!inputElement) {
@@ -139,9 +153,9 @@ function injectEnhanceIcon() {
     transform: translateY(-50%) !important;
     padding: 8px !important;
     border-radius: 6px !important;
-    
+    background: rgba(55, 65, 81, 0.1) !important;
+    border: 1px solid rgba(209, 213, 219, 0.3) !important;
     color: #374151 !important;
-    
     cursor: pointer !important;
     font-size: 14px !important;
     transition: all 0.2s ease !important;
@@ -159,6 +173,9 @@ function injectEnhanceIcon() {
     inputContainer.style.position = 'relative';
   }
 
+  // Create loading indicator
+  const loadingIndicator = createLoadingIndicator();
+
   // Add hover effects
   icon.addEventListener("mouseenter", () => {
     icon.style.background = "rgba(59, 130, 246, 0.1) !important";
@@ -174,177 +191,107 @@ function injectEnhanceIcon() {
     icon.style.transform = "translateY(-50%) scale(1) !important";
   });
 
-  // Create popup
-  const popup = createInPagePopup();
+  // Handle icon click - Direct enhancement
+  icon.addEventListener("click", handleDirectEnhancement);
 
-  // Handle icon click
-  icon.addEventListener("click", handleIconClick);
-
-  function handleIconClick(e) {
+  function handleDirectEnhancement(e) {
     e.preventDefault();
     e.stopPropagation();
     
-    console.log("🎯 Icon clicked, showing popup...");
+    console.log("🎯 Icon clicked, starting direct enhancement...");
 
-    // Show popup
-    popup.style.display = 'block';
-
-    // Load and display current role
-    chrome.storage.local.get("selectedRole", (result) => {
-      const currentRole = result.selectedRole || "Developer";
-      const roleDisplay = document.getElementById('current-role');
-      if (roleDisplay) {
-        roleDisplay.textContent = `👤 ${currentRole}`;
-        console.log("✅ Role loaded:", currentRole);
-      }
-    });
-
-    // Copy ChatGPT input to popup textarea
-    const promptInput = document.getElementById('prompt-input');
-    if (promptInput && inputElement) {
-      const chatGptText = inputElement.tagName === "TEXTAREA" || inputElement.tagName === "INPUT" 
-        ? inputElement.value 
-        : inputElement.textContent;
-      promptInput.value = chatGptText || '';
-      const charCountEl = document.getElementById('char-count');
-      if (charCountEl) {
-        charCountEl.textContent = promptInput.value.length;
-      }
-      console.log("📋 Copied ChatGPT input to popup:", chatGptText);
+    // Get current text from input
+    const inputField = findChatGPTInput();
+    if (!inputField) {
+      alert("Could not find input field. Please try again.");
+      return;
     }
 
-    setupPopupEventListeners(popup, icon);
+    const currentText = inputField.tagName === "TEXTAREA" || inputField.tagName === "INPUT" 
+      ? inputField.value 
+      : inputField.textContent;
+
+    if (!currentText || currentText.trim() === '') {
+      // Highlight input field if empty
+      inputField.style.borderColor = '#ef4444';
+      inputField.focus();
+      setTimeout(() => {
+        inputField.style.borderColor = '';
+      }, 2000);
+      return;
+    }
+
+    // Show loading indicator
+    loadingIndicator.style.display = 'block';
+    icon.style.opacity = '0.4';
+    icon.style.cursor = 'not-allowed';
     
-    // Focus on input after a short delay
-    setTimeout(() => {
-      if (promptInput) {
-        promptInput.focus();
-      }
-    }, 150);
-  }
+    console.log("⏳ Loading state activated");
+    console.log("📝 Current text:", currentText);
 
-  function setupPopupEventListeners(popup, icon) {
-    const promptInput = document.getElementById('prompt-input');
-    const charCount = document.getElementById('char-count');
-    const enhanceBtn = document.getElementById('enhance-btn');
-    const cancelBtn = document.getElementById('cancel-btn');
-    const closeBtn = document.getElementById('close-popup');
-    const loadingState = document.getElementById('loading-state');
+    // Get role from storage and send request
+    chrome.storage.local.get("selectedRole", (result) => {
+      const role = result.selectedRole || "Developer";
+      console.log("📤 Sending message with role:", role);
 
-    // Remove existing listeners to prevent duplicates
-    const newPromptInput = promptInput.cloneNode(true);
-    const newEnhanceBtn = enhanceBtn.cloneNode(true);
-    const newCancelBtn = cancelBtn.cloneNode(true);
-    const newCloseBtn = closeBtn.cloneNode(true);
-    
-    promptInput.parentNode.replaceChild(newPromptInput, promptInput);
-    enhanceBtn.parentNode.replaceChild(newEnhanceBtn, enhanceBtn);
-    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-    closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
-
-    // Character counter
-    newPromptInput.addEventListener('input', () => {
-      const charCountEl = document.getElementById('char-count');
-      if (charCountEl) {
-        charCountEl.textContent = newPromptInput.value.length;
-      }
-    });
-
-    // Close popup function
-    const closePopup = () => {
-      console.log("🚪 Closing popup...");
-      popup.style.display = 'none';
-      newPromptInput.value = '';
-      const charCountEl = document.getElementById('char-count');
-      if (charCountEl) charCountEl.textContent = '0';
-      if (loadingState) loadingState.style.display = 'none';
-    };
-
-    newCancelBtn.addEventListener('click', closePopup);
-    newCloseBtn.addEventListener('click', closePopup);
-
-    // Enhance button click
-    newEnhanceBtn.addEventListener('click', () => {
-      const userPrompt = newPromptInput.value.trim();
-      console.log("🚀 Enhance clicked with prompt:", userPrompt);
-      
-      if (!userPrompt) {
-        newPromptInput.focus();
-        newPromptInput.style.borderColor = '#ef4444';
-        setTimeout(() => {
-          newPromptInput.style.borderColor = '#d1d5db';
-        }, 2000);
-        return;
-      }
-
-      // Show loading state
-      if (loadingState) {
-        loadingState.style.display = 'block';
-      }
-      newEnhanceBtn.disabled = true;
-      newEnhanceBtn.style.opacity = '0.6';
-      console.log("⏳ Loading state activated");
-
-      // Get role from storage and send request
-      chrome.storage.local.get("selectedRole", (result) => {
-        const role = result.selectedRole || "Developer";
-        console.log("📤 Sending message with role:", role);
-
-        chrome.runtime.sendMessage(
-          {
-            type: "GENERATE_PROMPT",
-            payload: {
-              role,
-              input: userPrompt,
-            },
+      chrome.runtime.sendMessage(
+        {
+          type: "GENERATE_PROMPT",
+          payload: {
+            role,
+            input: currentText.trim(),
           },
-          (response) => {
-            console.log("📥 Response received:", response);
-            
-            if (loadingState) loadingState.style.display = 'none';
-            newEnhanceBtn.disabled = false;
-            newEnhanceBtn.style.opacity = '1';
+        },
+        (response) => {
+          console.log("📥 Response received:", response);
+          
+          // Hide loading indicator
+          loadingIndicator.style.display = 'none';
+          icon.style.opacity = '0.7';
+          icon.style.cursor = 'pointer';
 
-            if (chrome.runtime.lastError) {
-              console.error("❌ Runtime error:", chrome.runtime.lastError);
-              alert("Extension error: " + chrome.runtime.lastError.message);
-              return;
-            }
-
-            if (response && response.prompt) {
-              const inputField = findChatGPTInput();
-              if (inputField) {
-                if (inputField.tagName === "TEXTAREA" || inputField.tagName === "INPUT") {
-                  inputField.value = response.prompt;
-                  inputField.dispatchEvent(new Event("input", { bubbles: true }));
-                } else if (inputField.contentEditable === "true") {
-                  inputField.textContent = response.prompt;
-                  inputField.dispatchEvent(new Event("input", { bubbles: true }));
-                }
-
-                inputField.focus();
-                closePopup();
-                
-                // // Show success feedback
-                // icon.innerHTML = "✅";
-                // icon.style.background = "rgba(16, 185, 129, 0.1)";
-                // icon.style.borderColor = "rgba(16, 185, 129, 0.3)";
-                // setTimeout(() => {
-                //   icon.innerHTML = "✨";
-                //   icon.style.background = "rgba(55, 65, 81, 0.1)";
-                //   icon.style.borderColor = "rgba(209, 213, 219, 0.3)";
-                // }, 3000);
-                
-                console.log("✅ Prompt injected successfully");
-              } else {
-                alert("Could not inject prompt: No input field found");
-              }
-            } else {
-              alert("Failed to enhance prompt. Please try again.");
-            }
+          if (chrome.runtime.lastError) {
+            console.error("❌ Runtime error:", chrome.runtime.lastError);
+            alert("Extension error: " + chrome.runtime.lastError.message);
+            return;
           }
-        );
-      });
+
+          if (response && response.prompt) {
+            const inputField = findChatGPTInput();
+            if (inputField) {
+              // Clear and set new enhanced prompt
+              if (inputField.tagName === "TEXTAREA" || inputField.tagName === "INPUT") {
+                inputField.value = response.prompt;
+                inputField.dispatchEvent(new Event("input", { bubbles: true }));
+              } else if (inputField.contentEditable === "true") {
+                inputField.textContent = response.prompt;
+                inputField.dispatchEvent(new Event("input", { bubbles: true }));
+              }
+
+              inputField.focus();
+              
+              // Show success feedback
+              showSuccessMessage();
+              
+              // Temporarily change icon to success
+              icon.innerHTML = "✅";
+              icon.style.background = "rgba(16, 185, 129, 0.1) !important";
+              icon.style.borderColor = "rgba(16, 185, 129, 0.3) !important";
+              setTimeout(() => {
+                icon.innerHTML = "✨";
+                icon.style.background = "rgba(55, 65, 81, 0.1) !important";
+                icon.style.borderColor = "rgba(209, 213, 219, 0.3) !important";
+              }, 2000);
+              
+              console.log("✅ Prompt enhanced and injected successfully");
+            } else {
+              alert("Could not inject enhanced prompt: No input field found");
+            }
+          } else {
+            alert("Failed to enhance prompt. Please try again.");
+          }
+        }
+      );
     });
   }
 
@@ -354,19 +301,6 @@ function injectEnhanceIcon() {
   
   return true;
 }
-
-// Close popup when clicking outside
-document.addEventListener('click', (e) => {
-  const popup = document.getElementById('enhance-popup');
-  const icon = document.getElementById('enhance-icon');
-  
-  if (popup && popup.style.display === 'block' && 
-      !popup.contains(e.target) && 
-      e.target !== icon) {
-    console.log("🚪 Closing popup (clicked outside)");
-    popup.style.display = 'none';
-  }
-});
 
 // Main injection function with retries
 function attemptInjection() {
