@@ -229,10 +229,11 @@ function injectEnhanceIcon() {
     console.log("⏳ Loading state activated");
     console.log("📝 Current text:", currentText);
 
-    // Get role from storage and send request
-    chrome.storage.local.get("selectedRole", (result) => {
+    // Get role and userId from storage and send request
+    chrome.storage.local.get(["selectedRole", "userId"], (result) => {
       const role = result.selectedRole || "Developer";
-      console.log("📤 Sending message with role:", role);
+      const userId = result.userId;
+      console.log("📤 Sending message with role:", role, "userId:", userId);
 
       chrome.runtime.sendMessage(
         {
@@ -240,6 +241,7 @@ function injectEnhanceIcon() {
           payload: {
             role,
             input: currentText.trim(),
+            user_id: userId,
           },
         },
         (response) => {

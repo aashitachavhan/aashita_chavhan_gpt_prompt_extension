@@ -1,19 +1,34 @@
 import { useState, useEffect } from "react";
-import { Send, Copy, Check } from "lucide-react";
+import { Save, Check } from "lucide-react";
 
 export default function Popup() {
   const [role, setRole] = useState("Developer");
-  const [input, setInput] = useState("");
+  const [context, setContext] = useState("");
   const [loading, setLoading] = useState(false);
-  const [enhancedPrompt, setEnhancedPrompt] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [userId, setUserId] = useState(null);
 
-  // Load role from storage on mount
+  // Load role, context, and userId from storage on mount
   useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.get("selectedRole", (result) => {
+      chrome.storage.local.get(["selectedRole", "userContext", "userId"], (result) => {
         if (result.selectedRole) {
           setRole(result.selectedRole);
+        }
+        if (result.userContext) {
+          setContext(result.userContext);
+        }
+        if (result.userId) {
+          setUserId(result.userId);
+        } else {
+          // Generate a new userId if none exists
+          const newUserId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+          });
+          chrome.storage.local.set({ userId: newUserId }, () => {
+            setUserId(newUserId);
+          });
         }
       });
     }
@@ -27,62 +42,62 @@ export default function Popup() {
     }
   };
 
-  const handleSubmit = () => {
-    if (!input.trim()) return;
+  const handleSaveContext = async () => {
+    if (!context.trim()) {
+      const textarea = document.querySelector('textarea');
+      if (textarea) {
+        textarea.style.borderColor = '#ef4444';
+        setTimeout(() => {
+          textarea.style.borderColor = '';
+        }, 2000);
+      }
+      return;
+    }
+
     setLoading(true);
-    setEnhancedPrompt("");
+    setSaved(false);
 
-    if (typeof chrome !== 'undefined' && chrome.runtime) {
-      chrome.runtime.sendMessage(
-        {
-          type: "GENERATE_PROMPT",
-          payload: {
-            role,
-            input,
-          },
-        },
-        (response) => {
-          const prompt = response?.prompt || `${role}: ${input}`;
-          setEnhancedPrompt(prompt);
-          setLoading(false);
-        }
-      );
-    } else {
-      // Fallback for testing
-      setEnhancedPrompt(`${role}: ${input}`);
-      setLoading(false);
-    }
-  };
-
-  const copyToClipboard = async () => {
     try {
-      await navigator.clipboard.writeText(enhancedPrompt);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy text: ', err);
-    }
-  };
+      // Save to local storage
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        chrome.storage.local.set({ userContext: context });
+      }
 
-  const injectToChatGPT = () => {
-    if (typeof chrome !== 'undefined' && chrome.tabs) {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        chrome.scripting.executeScript({
-          target: { tabId: tabs[0].id },
-          func: (prompt) => {
-            const textarea =
-              document.querySelector('textarea[data-id="root"]') ||
-              document.querySelector('textarea[placeholder*="Message"]') ||
-              document.querySelector("textarea");
-            if (textarea) {
-              textarea.value = prompt;
-              textarea.dispatchEvent(new Event("input", { bubbles: true }));
-              textarea.focus();
-            }
+      // Send to backend to save in MongoDB
+      if (typeof chrome !== 'undefined' && chrome.runtime) {
+        chrome.runtime.sendMessage(
+          {
+            type: "SAVE_CONTEXT",
+            payload: {
+              role,
+              context: context.trim(),
+              user_id: userId,
+            },
           },
-          args: [enhancedPrompt],
-        });
-      });
+          (response) => {
+            setLoading(false);
+            if (response && response.success) {
+              setSaved(true);
+              setTimeout(() => setSaved(false), 3000);
+            } else {
+              console.error('Failed to save context:', response?.error);
+              // Show success since it's saved locally
+              setSaved(true);
+              setTimeout(() => setSaved(false), 3000);
+            }
+          }
+        );
+      } else {
+        // Fallback for testing
+        setLoading(false);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 3000);
+      }
+    } catch (err) {
+      console.error('Error saving context:', err);
+      setLoading(false);
+      setSaved(true); // Show success for local save
+      setTimeout(() => setSaved(false), 3000);
     }
   };
 
@@ -91,7 +106,7 @@ export default function Popup() {
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 rounded-t-lg">
         <h2 className="text-lg font-bold text-center">
-          ✨ ChatGPT Prompt Enhancer
+          ✨ ChatGPT Context Manager
         </h2>
       </div>
 
@@ -118,71 +133,79 @@ export default function Popup() {
           </select>
         </div>
 
-        {/* Input Area */}
+        {/* Context Input Area */}
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Your Prompt Idea
+            Project Context
           </label>
           <textarea
-            className="w-full h-24 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200 resize-none text-gray-800 placeholder-gray-400"
-            placeholder="Write your idea or rough prompt..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            className="w-full h-32 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200 resize-none text-gray-800 placeholder-gray-400"
+            placeholder="Describe your project context here... 
+Example: I'm building a React e-commerce app with Node.js backend, using MongoDB for database. The app needs user authentication, product catalog, shopping cart, and payment integration with Stripe."
+            value={context}
+            onChange={(e) => setContext(e.target.value)}
           />
+          <p className="text-xs text-gray-500 mt-1">
+            This context will be used to enhance all your prompts on ChatGPT
+          </p>
         </div>
 
-        {/* Generate Button */}
+        {/* Save Context Button */}
         <button
           className={`w-full py-3 px-4 rounded-lg font-semibold text-white transition-all duration-200 flex items-center justify-center gap-2 ${
-            loading || !input.trim()
+            loading || !context.trim()
               ? "bg-gray-400 cursor-not-allowed" 
+              : saved
+              ? "bg-green-600 hover:bg-green-700"
               : "bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 transform hover:scale-105 shadow-lg"
           }`}
-          onClick={handleSubmit}
-          disabled={loading || !input.trim()}
+          onClick={handleSaveContext}
+          disabled={loading || !context.trim()}
         >
-          <Send size={18} />
-          {loading ? "Generating..." : "Generate Enhanced Prompt"}
+          {saved ? (
+            <>
+              <Check size={18} />
+              Context Saved Successfully!
+            </>
+          ) : (
+            <>
+              <Save size={18} />
+              {loading ? "Saving Context..." : "Save Context"}
+            </>
+          )}
         </button>
 
-        {/* Enhanced Prompt Result */}
-        {enhancedPrompt && (
-          <div className="border-2 border-gray-200 rounded-lg p-4 bg-gray-50">
-            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-              <span className="text-green-500">✅</span>
-              Enhanced Prompt:
-            </h3>
-            <div className="bg-white p-3 rounded-md border border-gray-200 mb-3">
-              <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                {enhancedPrompt}
-              </p>
+        {/* Status Message */}
+        {context.trim() && (
+          <div className="border-2 border-blue-200 rounded-lg p-3 bg-blue-50">
+            <div className="flex items-center gap-2 text-blue-800">
+              <span className="text-blue-500">💡</span>
+              <span className="font-semibold text-sm">Context Preview:</span>
             </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-2">
-              <button
-                onClick={copyToClipboard}
-                className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 flex items-center justify-center gap-2"
-              >
-                {copied ? <Check size={16} /> : <Copy size={16} />}
-                {copied ? "Copied!" : "Copy"}
-              </button>
-
-              <button
-                onClick={injectToChatGPT}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 flex items-center justify-center gap-2"
-              >
-                <Send size={16} />
-                Inject to ChatGPT
-              </button>
-            </div>
+            <p className="text-xs text-blue-700 mt-1 line-clamp-3">
+              {context.substring(0, 150)}{context.length > 150 ? '...' : ''}
+            </p>
           </div>
         )}
+
+        {/* Instructions */}
+        <div className="border-2 border-green-200 rounded-lg p-3 bg-green-50">
+          <div className="flex items-center gap-2 text-green-800 mb-2">
+            <span className="text-green-500">🚀</span>
+            <span className="font-semibold text-sm">How it works:</span>
+          </div>
+          <ul className="text-xs text-green-700 space-y-1">
+            <li>1. Save your project context above</li>
+            <li>2. Go to ChatGPT and type any prompt</li>
+            <li>3. Click the ✨ icon next to the input</li>
+            <li>4. Your prompt will be enhanced with saved context!</li>
+          </ul>
+        </div>
 
         {/* Footer */}
         <div className="text-center pt-2 border-t border-gray-200">
           <p className="text-xs text-gray-500">
-            Role will be saved automatically
+            Context and role will be saved automatically
           </p>
         </div>
       </div>

@@ -1,28 +1,68 @@
 console.log("🚀 ChatGPT Prompt Enhancer: Background script loaded");
 
-// Initialize default role when extension is installed
+// Initialize default role and userId when extension is installed
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("Extension installed, setting default role");
-  chrome.storage.local.set({ selectedRole: "Developer" }, () => {
-    console.log("Default role set to Developer");
+  console.log("Extension installed, setting defaults");
+  const userId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+  chrome.storage.local.set({ 
+    selectedRole: "Developer",
+    userId: userId
+  }, () => {
+    console.log("Default role set to Developer, userId set to", userId);
   });
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log("📨 Message received:", message.type);
 
+  if (message.type === "SAVE_CONTEXT") {
+    const { role, context, user_id } = message.payload;
+
+    console.log("🎯 Saving context for user:", user_id, { role, context });
+
+    // Send to backend API to save context
+    fetch("http://127.0.0.1:8000/save-context", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ role, context, user_id }),
+    })
+      .then((res) => {
+        console.log("📡 Backend response status:", res.status);
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        console.log("✅ Context saved:", data);
+        sendResponse(data);
+      })
+      .catch((err) => {
+        console.error("❌ Backend API Error:", err);
+        console.error("🔧 Make sure backend is running on http://127.0.0.1:8000");
+        sendResponse({ success: false, error: err.message });
+      });
+
+    return true; // Keep message channel open for async response
+  }
+
   if (message.type === "GENERATE_PROMPT") {
-    const { role, input } = message.payload;
+    const { role, input, user_id } = message.payload;
 
-    console.log("🎯 Generating prompt with:", { role, input });
+    console.log("🎯 Generating prompt with:", { role, input, user_id });
 
-    // Send to your backend API
+    // Send to backend API
     fetch("http://127.0.0.1:8000/generate-prompt", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ role, input }),
+      body: JSON.stringify({ role, input, user_id }),
     })
       .then((res) => {
         console.log("📡 Backend response status:", res.status);
@@ -39,7 +79,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.error("❌ Backend API Error:", err);
         console.error("🔧 Make sure backend is running on http://127.0.0.1:8000");
 
-        // Simple fallback - just combine role and input like before
+        // Simple fallback - just combine role and input
         sendResponse({ prompt: `${role}: ${input}` });
       });
 
