@@ -4,12 +4,11 @@ from pydantic import BaseModel
 import httpx
 import os
 import re
-from typing import Optional
+from typing import Optional, List
 from dotenv import load_dotenv
 from datetime import datetime
 from pymongo import MongoClient
 from bson import ObjectId
-import uuid
 
 # Load environment variables from .env file
 load_dotenv()
@@ -33,22 +32,20 @@ if not MONGODB_URL:
     raise ValueError("MONGODB_URL environment variable is required. Please set your MongoDB Atlas connection string in your .env file.")
 
 try:
-    # MongoDB Atlas connection with additional options for better reliability
+    # MongoDB Atlas connection
     client = MongoClient(
         MONGODB_URL,
-        serverSelectionTimeoutMS=5000,  # 5 second timeout
-        connectTimeoutMS=10000,         # 10 second connection timeout
-        maxPoolSize=50,                 # Maximum number of connections
-        retryWrites=True               # Enable retryable writes
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=10000,
+        maxPoolSize=50,
+        retryWrites=True
     )
     
-    # Test the connection
     client.admin.command('ping')
     
     db = client[DATABASE_NAME]
     contexts_collection = db.contexts
     
-    # Create index on user_id for better query performance
     contexts_collection.create_index("user_id")
     contexts_collection.create_index([("user_id", 1), ("created_at", -1)])
     
@@ -58,14 +55,12 @@ try:
     
 except Exception as e:
     print(f"❌ MongoDB Atlas connection error: {e}")
-    print("🔧 Please check your MONGODB_URL in .env file")
-    print("🔧 Make sure your IP is whitelisted in MongoDB Atlas")
     raise e
 
-# Gemini API configuration from environment variables
+# Gemini API configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable is required. Please set it in your .env file.")
+    raise ValueError("GEMINI_API_KEY environment variable is required.")
 
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
@@ -73,6 +68,7 @@ class GeneratePromptRequest(BaseModel):
     role: str
     input: str
     user_id: Optional[str] = None
+    context_id: Optional[str] = None
 
 class SaveContextRequest(BaseModel):
     role: str
@@ -90,19 +86,16 @@ class ContextResponse(BaseModel):
     message: str
     context_id: Optional[str] = None
 
+class ContextsResponse(BaseModel):
+    success: bool
+    contexts: List[dict]
+
 def clean_markdown_formatting(text: str) -> str:
-    """Remove markdown formatting and convert to clean, well-structured text with proper spacing"""
-    
-    # Remove markdown headers (##, ###, etc.)
+    """Remove markdown formatting and convert to clean, well-structured text"""
     text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
-    
-    # Remove bold/italic markdown (**text**, *text*)
     text = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', text)
-    
-    # Remove backticks for code (`code`)
     text = re.sub(r'`([^`]+)`', r'\1', text)
     
-    # Process lines for better structure
     lines = text.split('\n')
     cleaned_lines = []
     list_counter = 1
@@ -110,67 +103,52 @@ def clean_markdown_formatting(text: str) -> str:
     
     for line in lines:
         line = line.strip()
-        
-        # Skip empty lines but preserve one for spacing
         if not line:
             if cleaned_lines and cleaned_lines[-1] != '':
                 cleaned_lines.append('')
             continue
-        
-        # Handle bullet points (- item or * item) 
         if re.match(r'^[-*]\s+', line):
             item_text = re.sub(r'^[-*]\s+', '', line)
             cleaned_lines.append(f"{list_counter}. {item_text}")
             list_counter += 1
             in_list = True
-        # Handle existing numbered lists (1. item, 2. item)
         elif re.match(r'^\d+\.\s+', line):
             cleaned_lines.append(line)
             in_list = True
-        # Section headers (lines ending with colon)
         elif line.endswith(':') or re.match(r'^[A-Z][^.]*:$', line):
-            # Add spacing before new section if needed
             if cleaned_lines and cleaned_lines[-1] != '':
                 cleaned_lines.append('')
             cleaned_lines.append(line)
-            cleaned_lines.append('')  # Add space after header
+            cleaned_lines.append('')
             list_counter = 1
             in_list = False
-        # Regular text
         else:
-            # Add proper spacing after lists
             if in_list and not line.startswith(('Requirements', 'Steps', 'Output', 'Note', 'Expected')):
                 cleaned_lines.append('')
                 in_list = False
             cleaned_lines.append(line)
     
-    # Join back and clean up excessive newlines
     text = '\n'.join(cleaned_lines)
     text = re.sub(r'\n{3,}', '\n\n', text)
-    
-    # Remove any remaining markdown-like formatting
-    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)  # Remove links [text](url)
-    text = re.sub(r'>\s+', '', text)  # Remove blockquotes
-    
-    # Clean up extra spaces
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    text = re.sub(r'>\s+', '', text)
     text = re.sub(r' {2,}', ' ', text)
     
     return text.strip()
 
-def get_user_context(user_id: str) -> Optional[str]:
+def get_user_context(user_id: str, context_id: Optional[str] = None) -> Optional[str]:
     """Retrieve user's saved context from MongoDB Atlas"""
     try:
-        # Get the most recent context for the user
-        context_doc = contexts_collection.find_one(
-            {"user_id": user_id},
-            sort=[("created_at", -1)]
-        )
+        if context_id:
+            context_doc = contexts_collection.find_one({"_id": ObjectId(context_id), "user_id": user_id})
+        else:
+            context_doc = contexts_collection.find_one({"user_id": user_id}, sort=[("created_at", -1)])
         
         if context_doc:
-            print(f"📥 Context retrieved for user: {user_id}")
+            print(f"📥 Context retrieved for user: {user_id}, context_id: {context_id or 'latest'}")
             return context_doc.get("context", "")
         else:
-            print(f"❌ No context found for user: {user_id}")
+            print(f"❌ No context found for user: {user_id}, context_id: {context_id or 'latest'}")
         
     except Exception as e:
         print(f"❌ Error retrieving context from Atlas: {e}")
@@ -178,8 +156,7 @@ def get_user_context(user_id: str) -> Optional[str]:
     return None
 
 async def call_gemini_api(prompt_text: str, role: Optional[str] = None, context: Optional[str] = None) -> str:
-    """Call Gemini 2.0 Flash API to generate enhanced prompt with context"""
-    
+    """Call Gemini 2.0 Flash API to generate enhanced prompt"""
     if role and context:
         system_prompt = f"""You are an expert AI assistant. Create a personalized, comprehensive prompt for a {role} based on their query and project context.
 
@@ -202,24 +179,20 @@ Project Context Integration:
 [Brief summary of how the current query relates to the user's project]
 
 Steps to Follow:
-
 1. [First specific step considering both role and project context]
 2. [Second specific step that builds on the project context]
 3. [Third specific step that leverages existing project knowledge]
 4. [Additional steps as needed]
 
 Requirements for your project:
-
 1. [Requirement that aligns with project context]
 2. [Technical requirement specific to the project stack]
 3. [Additional requirements based on context]
 
 Expected Output:
-
 [Clear description of what should be delivered, considering the project context]
 
 Contextual Considerations:
-
 1. [How this relates to the existing project architecture]
 2. [Integration points with current project components]
 3. [Best practices specific to the project stack mentioned in context]
@@ -230,9 +203,7 @@ IMPORTANT GUIDELINES:
 - Make each step actionable and project-specific
 - Reference technologies/tools mentioned in the project context
 - Keep sections well-spaced with line breaks
-- No markdown formatting - just clean, structured text
-
-Create a comprehensive, context-aware guide that speaks directly to the {role} working on their specific project."""
+- No markdown formatting - just clean, structured text"""
     
     elif role:
         system_prompt = f"""You are an expert AI assistant. Create a personalized, comprehensive prompt for a {role} based on their query.
@@ -251,24 +222,20 @@ STRUCTURE THE RESPONSE EXACTLY LIKE THIS:
 As a {role}, here's what you need to do for: [task description]
 
 Steps to Follow:
-
 1. [First specific step for this role]
 2. [Second specific step for this role] 
 3. [Third specific step for this role]
 4. [Additional steps as needed]
 
 Requirements for you as a {role}:
-
 1. [Specific requirement 1]
 2. [Specific requirement 2]
 3. [Additional requirements]
 
 Expected Output:
-
 [Clear description of what the {role} should produce/deliver]
 
 Additional Considerations:
-
 1. [Best practice or tip specific to this role]
 2. [Another consideration for this role]
 
@@ -295,18 +262,15 @@ STRUCTURE THE RESPONSE LIKE THIS:
 Here's what you need to do: [clear task description]
 
 Steps to Follow:
-
 1. [First step]
 2. [Second step]
 3. [Third step]
 
 Requirements:
-
 1. [Requirement 1]
 2. [Requirement 2]
 
 Expected Output:
-
 [Description of desired result]
 
 Make it comprehensive, actionable, and well-formatted with clear sections and proper spacing."""
@@ -353,9 +317,7 @@ Make it comprehensive, actionable, and well-formatted with clear sections and pr
                 fallback += f"Please help me with: {prompt_text}"
                 return fallback
             
-            # Clean markdown formatting from the response
             cleaned_text = clean_markdown_formatting(enhanced_text)
-            
             return cleaned_text.strip()
             
     except httpx.TimeoutException:
@@ -377,27 +339,19 @@ Make it comprehensive, actionable, and well-formatted with clear sections and pr
 async def save_context(request: SaveContextRequest):
     """Save user context to MongoDB Atlas"""
     try:
-        # Generate user_id if not provided
-        user_id = request.user_id or str(uuid.uuid4())
-        
         context_data = {
-            "user_id": user_id,
+            "user_id": request.user_id,
             "role": request.role,
             "context": request.context,
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
         
-        # Update existing context or insert new one
-        result = contexts_collection.update_one(
-            {"user_id": user_id},
-            {"$set": context_data},
-            upsert=True
-        )
+        # Insert new context (do not update existing)
+        result = contexts_collection.insert_one(context_data)
+        context_id = str(result.inserted_id)
         
-        context_id = str(result.upserted_id) if result.upserted_id else "updated"
-        
-        print(f"💾 Context saved to Atlas for user: {user_id}")
+        print(f"💾 Context saved to Atlas for user: {request.user_id}, context_id: {context_id}")
         print(f"📝 Context preview: {request.context[:100]}...")
         
         return ContextResponse(
@@ -417,10 +371,9 @@ async def save_context(request: SaveContextRequest):
 async def generate_prompt(request: GeneratePromptRequest):
     """Generate enhanced prompt based on role, input, and saved context"""
     try:
-        # Get user's saved context if user_id is provided
         context = None
         if request.user_id:
-            context = get_user_context(request.user_id)
+            context = get_user_context(request.user_id, request.context_id)
         
         enhanced_prompt = await call_gemini_api(request.input, request.role, context)
         return PromptResponse(prompt=enhanced_prompt)
@@ -436,26 +389,29 @@ async def enhance_prompt(request: EnhancePromptRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error enhancing prompt: {str(e)}")
 
-@app.get("/get-context/{user_id}")
-async def get_context(user_id: str):
-    """Get user's saved context"""
+@app.get("/get-contexts/{user_id}", response_model=ContextsResponse)
+async def get_contexts(user_id: str):
+    """Get all saved contexts for a user"""
     try:
-        context = get_user_context(user_id)
-        if context:
-            return {"success": True, "context": context}
-        else:
-            return {"success": False, "message": "No context found for user"}
+        context_docs = contexts_collection.find({"user_id": user_id}).sort("created_at", -1)
+        contexts = [
+            {
+                "context_id": str(doc["_id"]),
+                "role": doc["role"],
+                "context": doc["context"],
+                "created_at": doc["created_at"].isoformat()
+            }
+            for doc in context_docs
+        ]
+        return ContextsResponse(success=True, contexts=contexts)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving context: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving contexts: {str(e)}")
 
 @app.get("/test")
 async def test_endpoint():
     """Test endpoint for debugging with MongoDB Atlas status"""
     try:
-        # Test Atlas connection
         client.admin.command('ping')
-        
-        # Get database stats
         stats = db.command("dbstats")
         collections_count = len(db.list_collection_names())
         

@@ -23,7 +23,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     console.log("🎯 Saving context for user:", user_id, { role, context });
 
-    // Send to backend API to save context
     fetch("http://127.0.0.1:8000/save-context", {
       method: "POST",
       headers: {
@@ -48,21 +47,50 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: err.message });
       });
 
-    return true; // Keep message channel open for async response
+    return true;
+  }
+
+  if (message.type === "GET_CONTEXTS") {
+    const { user_id } = message.payload;
+
+    console.log("🎯 Fetching contexts for user:", user_id);
+
+    fetch(`http://127.0.0.1:8000/get-contexts/${user_id}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+      .then((res) => {
+        console.log("📡 Backend response status:", res.status);
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        console.log("✅ Contexts retrieved:", data);
+        sendResponse(data);
+      })
+      .catch((err) => {
+        console.error("❌ Backend API Error:", err);
+        sendResponse({ success: false, contexts: [] });
+      });
+
+    return true;
   }
 
   if (message.type === "GENERATE_PROMPT") {
-    const { role, input, user_id } = message.payload;
+    const { role, input, user_id, context_id } = message.payload;
 
-    console.log("🎯 Generating prompt with:", { role, input, user_id });
+    console.log("🎯 Generating prompt with:", { role, input, user_id, context_id });
 
-    // Send to backend API
     fetch("http://127.0.0.1:8000/generate-prompt", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ role, input, user_id }),
+      body: JSON.stringify({ role, input, user_id, context_id }),
     })
       .then((res) => {
         console.log("📡 Backend response status:", res.status);
@@ -78,12 +106,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((err) => {
         console.error("❌ Backend API Error:", err);
         console.error("🔧 Make sure backend is running on http://127.0.0.1:8000");
-
-        // Simple fallback - just combine role and input
         sendResponse({ prompt: `${role}: ${input}` });
       });
 
-    return true; // Keep message channel open for async response
+    return true;
   }
 
   if (message.type === "ENHANCE_PROMPT") {
@@ -111,9 +137,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .catch((err) => {
         console.error("❌ Enhancement API Error:", err);
-        sendResponse({ prompt: userInput }); // fallback
+        sendResponse({ prompt: userInput });
       });
 
-    return true; // Keep message channel open for async response
+    return true;
   }
 });

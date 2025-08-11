@@ -94,13 +94,11 @@ function showSuccessMessage() {
   
   document.body.appendChild(message);
   
-  // Animate in
   setTimeout(() => {
     message.style.transform = 'translateY(0)';
     message.style.opacity = '1';
   }, 100);
   
-  // Remove after 3 seconds
   setTimeout(() => {
     message.style.transform = 'translateY(-20px)';
     message.style.opacity = '0';
@@ -114,7 +112,6 @@ function showSuccessMessage() {
 
 // Function to inject the enhance icon near input
 function injectEnhanceIcon() {
-  // Remove existing elements
   const existingIcon = document.getElementById("enhance-icon");
   const existingLoading = document.getElementById("enhance-loading");
   if (existingIcon) existingIcon.remove();
@@ -126,7 +123,6 @@ function injectEnhanceIcon() {
     return false;
   }
 
-  // Find the input container to position icon relative to it
   const inputContainer = inputElement.closest('form') || 
                         inputElement.closest('div[data-testid]') || 
                         inputElement.closest('.relative') ||
@@ -139,13 +135,11 @@ function injectEnhanceIcon() {
 
   console.log("🎯 Input container found, creating icon...");
 
-  // Create the enhance icon
   const icon = document.createElement("button");
   icon.id = "enhance-icon";
   icon.innerHTML = "✨";
   icon.title = "Enhance Prompt with AI";
   
-  // Position icon inside the input area
   icon.style.cssText = `
     position: absolute !important;
     right: 92px !important;
@@ -168,15 +162,12 @@ function injectEnhanceIcon() {
     opacity: 0.7 !important;
   `;
 
-  // Make sure the container is positioned relative
   if (getComputedStyle(inputContainer).position === 'static') {
     inputContainer.style.position = 'relative';
   }
 
-  // Create loading indicator
   const loadingIndicator = createLoadingIndicator();
 
-  // Add hover effects
   icon.addEventListener("mouseenter", () => {
     icon.style.background = "rgba(59, 130, 246, 0.1) !important";
     icon.style.borderColor = "rgba(59, 130, 246, 0.3) !important";
@@ -191,7 +182,6 @@ function injectEnhanceIcon() {
     icon.style.transform = "translateY(-50%) scale(1) !important";
   });
 
-  // Handle icon click - Direct enhancement
   icon.addEventListener("click", handleDirectEnhancement);
 
   function handleDirectEnhancement(e) {
@@ -200,7 +190,6 @@ function injectEnhanceIcon() {
     
     console.log("🎯 Icon clicked, starting direct enhancement...");
 
-    // Get current text from input
     const inputField = findChatGPTInput();
     if (!inputField) {
       alert("Could not find input field. Please try again.");
@@ -212,7 +201,6 @@ function injectEnhanceIcon() {
       : inputField.textContent;
 
     if (!currentText || currentText.trim() === '') {
-      // Highlight input field if empty
       inputField.style.borderColor = '#ef4444';
       inputField.focus();
       setTimeout(() => {
@@ -221,7 +209,6 @@ function injectEnhanceIcon() {
       return;
     }
 
-    // Show loading indicator
     loadingIndicator.style.display = 'block';
     icon.style.opacity = '0.4';
     icon.style.cursor = 'not-allowed';
@@ -229,11 +216,11 @@ function injectEnhanceIcon() {
     console.log("⏳ Loading state activated");
     console.log("📝 Current text:", currentText);
 
-    // Get role and userId from storage and send request
-    chrome.storage.local.get(["selectedRole", "userId"], (result) => {
+    chrome.storage.local.get(["selectedRole", "userId", "selectedContextId"], (result) => {
       const role = result.selectedRole || "Developer";
       const userId = result.userId;
-      console.log("📤 Sending message with role:", role, "userId:", userId);
+      const contextId = result.selectedContextId;
+      console.log("📤 Sending message with:", { role, userId, contextId });
 
       chrome.runtime.sendMessage(
         {
@@ -242,12 +229,12 @@ function injectEnhanceIcon() {
             role,
             input: currentText.trim(),
             user_id: userId,
+            context_id: contextId,
           },
         },
         (response) => {
           console.log("📥 Response received:", response);
           
-          // Hide loading indicator
           loadingIndicator.style.display = 'none';
           icon.style.opacity = '0.7';
           icon.style.cursor = 'pointer';
@@ -261,7 +248,6 @@ function injectEnhanceIcon() {
           if (response && response.prompt) {
             const inputField = findChatGPTInput();
             if (inputField) {
-              // Clear and set new enhanced prompt
               if (inputField.tagName === "TEXTAREA" || inputField.tagName === "INPUT") {
                 inputField.value = response.prompt;
                 inputField.dispatchEvent(new Event("input", { bubbles: true }));
@@ -272,10 +258,8 @@ function injectEnhanceIcon() {
 
               inputField.focus();
               
-              // Show success feedback
               showSuccessMessage();
               
-              // Temporarily change icon to success
               icon.innerHTML = "✅";
               icon.style.background = "rgba(16, 185, 129, 0.1) !important";
               icon.style.borderColor = "rgba(16, 185, 129, 0.3) !important";
@@ -297,7 +281,6 @@ function injectEnhanceIcon() {
     });
   }
 
-  // Add to container
   inputContainer.appendChild(icon);
   console.log("🎉 Enhance icon successfully added to input area!");
   
