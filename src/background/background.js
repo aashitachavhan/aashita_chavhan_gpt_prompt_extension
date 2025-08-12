@@ -1,40 +1,33 @@
 console.log("🚀 ChatGPT Prompt Enhancer: Background script loaded");
 
-// Initialize default role and userId when extension is installed
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("Extension installed, setting defaults");
-  const userId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-  chrome.storage.local.set({ 
-    selectedRole: "Developer",
-    userId: userId
-  }, () => {
-    console.log("Default role set to Developer, userId set to", userId);
+  console.log("Extension installed, setting default role");
+  chrome.storage.local.set({ selectedRole: "Developer" }, () => {
+    console.log("Default role set to Developer");
   });
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log("📨 Message received:", message.type);
 
-  if (message.type === "SAVE_CONTEXT") {
-    const { role, context, user_id } = message.payload;
+  const addAuthHeader = (headers, token) => ({
+    ...headers,
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  });
 
-    console.log("🎯 Saving context for user:", user_id, { role, context });
+  if (message.type === "SAVE_CONTEXT") {
+    const { role, context, token } = message.payload;
+    console.log("🎯 Saving context");
 
     fetch("http://127.0.0.1:8000/save-context", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ role, context, user_id }),
+      headers: addAuthHeader({}, token),
+      body: JSON.stringify({ role, context }),
     })
       .then((res) => {
         console.log("📡 Backend response status:", res.status);
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         return res.json();
       })
       .then((data) => {
@@ -43,7 +36,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .catch((err) => {
         console.error("❌ Backend API Error:", err);
-        console.error("🔧 Make sure backend is running on http://127.0.0.1:8000");
         sendResponse({ success: false, error: err.message });
       });
 
@@ -51,21 +43,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "GET_CONTEXTS") {
-    const { user_id } = message.payload;
+    const { token } = message.payload;
+    console.log("🎯 Fetching contexts");
 
-    console.log("🎯 Fetching contexts for user:", user_id);
-
-    fetch(`http://127.0.0.1:8000/get-contexts/${user_id}`, {
+    fetch("http://127.0.0.1:8000/get-contexts", {
       method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: addAuthHeader({}, token),
     })
       .then((res) => {
         console.log("📡 Backend response status:", res.status);
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         return res.json();
       })
       .then((data) => {
@@ -81,22 +68,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "GENERATE_PROMPT") {
-    const { role, input, user_id, context_id } = message.payload;
-
-    console.log("🎯 Generating prompt with:", { role, input, user_id, context_id });
+    const { role, input, context_id, token } = message.payload;
+    console.log("🎯 Generating prompt with:", { role, input, context_id });
 
     fetch("http://127.0.0.1:8000/generate-prompt", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ role, input, user_id, context_id }),
+      headers: addAuthHeader({}, token),
+      body: JSON.stringify({ role, input, context_id }),
     })
       .then((res) => {
         console.log("📡 Backend response status:", res.status);
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         return res.json();
       })
       .then((data) => {
@@ -105,7 +87,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .catch((err) => {
         console.error("❌ Backend API Error:", err);
-        console.error("🔧 Make sure backend is running on http://127.0.0.1:8000");
         sendResponse({ prompt: `${role}: ${input}` });
       });
 
@@ -113,22 +94,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "ENHANCE_PROMPT") {
-    const { payload: userInput } = message;
-
+    const { payload: userInput, token } = message.payload;
     console.log("🔧 Enhancing prompt:", userInput);
 
     fetch("http://127.0.0.1:8000/enhance-prompt", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: addAuthHeader({}, token),
       body: JSON.stringify({ prompt: userInput }),
     })
       .then((res) => {
         console.log("📡 Backend response status:", res.status);
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         return res.json();
       })
       .then((data) => {

@@ -1,58 +1,53 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 import httpx
 import os
 import re
 from typing import Optional, List
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
 from pymongo import MongoClient
 from bson import ObjectId
+from passlib.context import CryptContext
+import jwt
+from datetime import datetime
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
 app = FastAPI(title="ChatGPT Context-Aware Prompt Enhancer Backend")
 
-# Add CORS middleware to allow requests from the extension
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# MongoDB Atlas configuration
+# MongoDB configuration
 MONGODB_URL = os.getenv("MONGODB_URL")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "prompt_enhancer")
+JWT_SECRET = os.getenv("JWT_SECRET")
 
 if not MONGODB_URL:
-    raise ValueError("MONGODB_URL environment variable is required. Please set your MongoDB Atlas connection string in your .env file.")
+    raise ValueError("MONGODB_URL required")
+if not JWT_SECRET:
+    raise ValueError("JWT_SECRET required in .env file")
 
 try:
-    # MongoDB Atlas connection
-    client = MongoClient(
-        MONGODB_URL,
-        serverSelectionTimeoutMS=5000,
-        connectTimeoutMS=10000,
-        maxPoolSize=50,
-        retryWrites=True
-    )
-    
+    client = MongoClient(MONGODB_URL, serverSelectionTimeoutMS=5000, connectTimeoutMS=10000, maxPoolSize=50, retryWrites=True)
     client.admin.command('ping')
-    
     db = client[DATABASE_NAME]
     contexts_collection = db.contexts
-    
+    users_collection = db.users
     contexts_collection.create_index("user_id")
     contexts_collection.create_index([("user_id", 1), ("created_at", -1)])
-    
+    users_collection.create_index("email", unique=True)
     print(f"✅ Connected to MongoDB Atlas: {DATABASE_NAME}")
-    print(f"📊 Database: {db.name}")
-    print(f"🔗 Collection: {contexts_collection.name}")
-    
 except Exception as e:
     print(f"❌ MongoDB Atlas connection error: {e}")
     raise e
@@ -60,20 +55,36 @@ except Exception as e:
 # Gemini API configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable is required.")
-
+    raise ValueError("GEMINI_API_KEY required")
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# JWT authentication
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+JWT_ALGORITHM = "HS256"
+
+class UserRegister(BaseModel):
+    email: str
+    password: str
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
 class GeneratePromptRequest(BaseModel):
     role: str
     input: str
-    user_id: Optional[str] = None
     context_id: Optional[str] = None
 
 class SaveContextRequest(BaseModel):
     role: str
     context: str
-    user_id: Optional[str] = None
 
 class EnhancePromptRequest(BaseModel):
     prompt: str
@@ -90,17 +101,43 @@ class ContextsResponse(BaseModel):
     success: bool
     contexts: List[dict]
 
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        user = users_collection.find_one({"email": email})
+        if user is None:
+            raise HTTPException(status_code=401, detail="User not found")
+        return {"user_id": str(user["_id"]), "email": user["email"]}
+    except jwt.PyJWTError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+
 def clean_markdown_formatting(text: str) -> str:
-    """Remove markdown formatting and convert to clean, well-structured text"""
     text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
     text = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', text)
     text = re.sub(r'`([^`]+)`', r'\1', text)
-    
     lines = text.split('\n')
     cleaned_lines = []
     list_counter = 1
     in_list = False
-    
     for line in lines:
         line = line.strip()
         if not line:
@@ -127,36 +164,29 @@ def clean_markdown_formatting(text: str) -> str:
                 cleaned_lines.append('')
                 in_list = False
             cleaned_lines.append(line)
-    
     text = '\n'.join(cleaned_lines)
     text = re.sub(r'\n{3,}', '\n\n', text)
     text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
     text = re.sub(r'>\s+', '', text)
     text = re.sub(r' {2,}', ' ', text)
-    
     return text.strip()
 
 def get_user_context(user_id: str, context_id: Optional[str] = None) -> Optional[str]:
-    """Retrieve user's saved context from MongoDB Atlas"""
     try:
         if context_id:
             context_doc = contexts_collection.find_one({"_id": ObjectId(context_id), "user_id": user_id})
         else:
             context_doc = contexts_collection.find_one({"user_id": user_id}, sort=[("created_at", -1)])
-        
         if context_doc:
             print(f"📥 Context retrieved for user: {user_id}, context_id: {context_id or 'latest'}")
             return context_doc.get("context", "")
         else:
             print(f"❌ No context found for user: {user_id}, context_id: {context_id or 'latest'}")
-        
     except Exception as e:
         print(f"❌ Error retrieving context from Atlas: {e}")
-    
     return None
 
 async def call_gemini_api(prompt_text: str, role: Optional[str] = None, context: Optional[str] = None) -> str:
-    """Call Gemini 2.0 Flash API to generate enhanced prompt"""
     if role and context:
         system_prompt = f"""You are an expert AI assistant. Create a personalized, comprehensive prompt for a {role} based on their query and project context.
 
@@ -204,7 +234,6 @@ IMPORTANT GUIDELINES:
 - Reference technologies/tools mentioned in the project context
 - Keep sections well-spaced with line breaks
 - No markdown formatting - just clean, structured text"""
-    
     elif role:
         system_prompt = f"""You are an expert AI assistant. Create a personalized, comprehensive prompt for a {role} based on their query.
 
@@ -223,7 +252,7 @@ As a {role}, here's what you need to do for: [task description]
 
 Steps to Follow:
 1. [First specific step for this role]
-2. [Second specific step for this role] 
+2. [Second specific step for this role]
 3. [Third specific step for this role]
 4. [Additional steps as needed]
 
@@ -246,7 +275,6 @@ IMPORTANT GUIDELINES:
 - Include role-relevant best practices and considerations
 - Keep sections well-spaced with line breaks
 - No markdown formatting - just clean, structured text"""
-    
     else:
         system_prompt = f"""Please enhance and structure this prompt to make it more effective for ChatGPT:
 
@@ -276,50 +304,26 @@ Expected Output:
 Make it comprehensive, actionable, and well-formatted with clear sections and proper spacing."""
     
     payload = {
-        "contents": [
-            {
-                "parts": [
-                    {
-                        "text": system_prompt
-                    }
-                ]
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.7,
-            "topK": 40,
-            "topP": 0.8,
-            "maxOutputTokens": 2048
-        }
+        "contents": [{"parts": [{"text": system_prompt}]}],
+        "generationConfig": {"temperature": 0.7, "topK": 40, "topP": 0.8, "maxOutputTokens": 2048}
     }
     
-    headers = {
-        "Content-Type": "application/json",
-        "X-goog-api-key": GEMINI_API_KEY
-    }
+    headers = {"Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY}
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                GEMINI_API_URL,
-                json=payload,
-                headers=headers
-            )
+            response = await client.post(GEMINI_API_URL, json=payload, headers=headers)
             response.raise_for_status()
-            
             data = response.json()
             enhanced_text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-            
             if not enhanced_text:
                 fallback = f"You are a {role}. " if role else ""
                 if context:
                     fallback += f"Project context: {context}. "
                 fallback += f"Please help me with: {prompt_text}"
                 return fallback
-            
             cleaned_text = clean_markdown_formatting(enhanced_text)
             return cleaned_text.strip()
-            
     except httpx.TimeoutException:
         print("Gemini API timeout")
         fallback = f"You are a {role}. " if role else ""
@@ -335,65 +339,79 @@ Make it comprehensive, actionable, and well-formatted with clear sections and pr
         fallback += f"Please help me with: {prompt_text}"
         return fallback
 
+@app.post("/register")
+async def register_user(user: UserRegister):
+    try:
+        if users_collection.find_one({"email": user.email}):
+            raise HTTPException(status_code=400, detail="Email already registered")
+        hashed_password = get_password_hash(user.password)
+        user_data = {
+            "email": user.email,
+            "hashed_password": hashed_password,
+            "created_at": datetime.utcnow()
+        }
+        result = users_collection.insert_one(user_data)
+        print(f"✅ User registered: {user.email}, user_id: {str(result.inserted_id)}")
+        return {"success": True, "user_id": str(result.inserted_id)}
+    except Exception as e:
+        print(f"❌ Error registering user: {e}")
+        raise HTTPException(status_code=500, detail=f"Error registering user: {str(e)}")
+
+@app.post("/login", response_model=Token)
+async def login_user(user: UserLogin):
+    try:
+        db_user = users_collection.find_one({"email": user.email})
+        if not db_user or not verify_password(user.password, db_user["hashed_password"]):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        access_token_expires = timedelta(minutes=30)
+        access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
+        print(f"✅ User logged in: {user.email}")
+        return {"access_token": access_token, "token_type": "bearer"}
+    except Exception as e:
+        print(f"❌ Error logging in: {e}")
+        raise HTTPException(status_code=500, detail=f"Error logging in: {str(e)}")
+
 @app.post("/save-context", response_model=ContextResponse)
-async def save_context(request: SaveContextRequest):
-    """Save user context to MongoDB Atlas"""
+async def save_context(request: SaveContextRequest, current_user: dict = Depends(get_current_user)):
     try:
         context_data = {
-            "user_id": request.user_id,
+            "user_id": current_user["user_id"],
             "role": request.role,
             "context": request.context,
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
-        
-        # Insert new context (do not update existing)
         result = contexts_collection.insert_one(context_data)
         context_id = str(result.inserted_id)
-        
-        print(f"💾 Context saved to Atlas for user: {request.user_id}, context_id: {context_id}")
-        print(f"📝 Context preview: {request.context[:100]}...")
-        
-        return ContextResponse(
-            success=True,
-            message="Context saved successfully to MongoDB Atlas",
-            context_id=context_id
-        )
-            
+        print(f"💾 Context saved for user: {current_user['user_id']}, context_id: {context_id}")
+        return ContextResponse(success=True, message="Context saved successfully", context_id=context_id)
     except Exception as e:
-        print(f"❌ Error saving context to Atlas: {e}")
-        return ContextResponse(
-            success=False,
-            message=f"Error saving context to MongoDB Atlas: {str(e)}"
-        )
+        print(f"❌ Error saving context: {e}")
+        return ContextResponse(success=False, message=f"Error saving context: {str(e)}")
 
 @app.post("/generate-prompt", response_model=PromptResponse)
-async def generate_prompt(request: GeneratePromptRequest):
-    """Generate enhanced prompt based on role, input, and saved context"""
+async def generate_prompt(request: GeneratePromptRequest, current_user: dict = Depends(get_current_user)):
     try:
-        context = None
-        if request.user_id:
-            context = get_user_context(request.user_id, request.context_id)
-        
+        context = get_user_context(current_user["user_id"], request.context_id)
         enhanced_prompt = await call_gemini_api(request.input, request.role, context)
         return PromptResponse(prompt=enhanced_prompt)
     except Exception as e:
+        print(f"❌ Error generating prompt: {e}")
         raise HTTPException(status_code=500, detail=f"Error generating prompt: {str(e)}")
 
 @app.post("/enhance-prompt", response_model=PromptResponse)
-async def enhance_prompt(request: EnhancePromptRequest):
-    """Enhance a general prompt without specific role"""
+async def enhance_prompt(request: EnhancePromptRequest, current_user: dict = Depends(get_current_user)):
     try:
         enhanced_prompt = await call_gemini_api(request.prompt)
         return PromptResponse(prompt=enhanced_prompt)
     except Exception as e:
+        print(f"❌ Error enhancing prompt: {e}")
         raise HTTPException(status_code=500, detail=f"Error enhancing prompt: {str(e)}")
 
-@app.get("/get-contexts/{user_id}", response_model=ContextsResponse)
-async def get_contexts(user_id: str):
-    """Get all saved contexts for a user"""
+@app.get("/get-contexts", response_model=ContextsResponse)
+async def get_contexts(current_user: dict = Depends(get_current_user)):
     try:
-        context_docs = contexts_collection.find({"user_id": user_id}).sort("created_at", -1)
+        context_docs = contexts_collection.find({"user_id": current_user["user_id"]}).sort("created_at", -1)
         contexts = [
             {
                 "context_id": str(doc["_id"]),
@@ -403,43 +421,32 @@ async def get_contexts(user_id: str):
             }
             for doc in context_docs
         ]
+        print(f"✅ Contexts retrieved for user: {current_user['user_id']}")
         return ContextsResponse(success=True, contexts=contexts)
     except Exception as e:
+        print(f"❌ Error retrieving contexts: {e}")
         raise HTTPException(status_code=500, detail=f"Error retrieving contexts: {str(e)}")
 
 @app.get("/test")
 async def test_endpoint():
-    """Test endpoint for debugging with MongoDB Atlas status"""
     try:
         client.admin.command('ping')
         stats = db.command("dbstats")
         collections_count = len(db.list_collection_names())
-        
         atlas_status = {
             "connected": True,
             "database": db.name,
             "collections_count": collections_count,
             "storage_size": f"{stats.get('storageSize', 0)} bytes"
         }
-        
         print("🔍 MongoDB Atlas connection test successful")
-        
     except Exception as e:
-        atlas_status = {
-            "connected": False,
-            "error": str(e)
-        }
+        atlas_status = {"connected": False, "error": str(e)}
         print(f"❌ MongoDB Atlas connection test failed: {e}")
-    
-    return {
-        "message": "Backend is working!",
-        "mongodb_atlas": atlas_status,
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    return {"message": "Backend is working!", "mongodb_atlas": atlas_status, "timestamp": datetime.utcnow().isoformat()}
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     return {"status": "healthy", "message": "Backend is running"}
 
 if __name__ == "__main__":

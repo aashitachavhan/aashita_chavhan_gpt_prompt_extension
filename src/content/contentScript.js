@@ -184,102 +184,92 @@ function injectEnhanceIcon() {
 
   icon.addEventListener("click", handleDirectEnhancement);
 
-  function handleDirectEnhancement(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    console.log("🎯 Icon clicked, starting direct enhancement...");
+// [Previous imports and functions remain unchanged]
 
-    const inputField = findChatGPTInput();
-    if (!inputField) {
-      alert("Could not find input field. Please try again.");
-      return;
-    }
+function handleDirectEnhancement(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  console.log("🎯 Icon clicked, starting direct enhancement...");
 
-    const currentText = inputField.tagName === "TEXTAREA" || inputField.tagName === "INPUT" 
-      ? inputField.value 
-      : inputField.textContent;
-
-    if (!currentText || currentText.trim() === '') {
-      inputField.style.borderColor = '#ef4444';
-      inputField.focus();
-      setTimeout(() => {
-        inputField.style.borderColor = '';
-      }, 2000);
-      return;
-    }
-
-    loadingIndicator.style.display = 'block';
-    icon.style.opacity = '0.4';
-    icon.style.cursor = 'not-allowed';
-    
-    console.log("⏳ Loading state activated");
-    console.log("📝 Current text:", currentText);
-
-    chrome.storage.local.get(["selectedRole", "userId", "selectedContextId"], (result) => {
-      const role = result.selectedRole || "Developer";
-      const userId = result.userId;
-      const contextId = result.selectedContextId;
-      console.log("📤 Sending message with:", { role, userId, contextId });
-
-      chrome.runtime.sendMessage(
-        {
-          type: "GENERATE_PROMPT",
-          payload: {
-            role,
-            input: currentText.trim(),
-            user_id: userId,
-            context_id: contextId,
-          },
-        },
-        (response) => {
-          console.log("📥 Response received:", response);
-          
-          loadingIndicator.style.display = 'none';
-          icon.style.opacity = '0.7';
-          icon.style.cursor = 'pointer';
-
-          if (chrome.runtime.lastError) {
-            console.error("❌ Runtime error:", chrome.runtime.lastError);
-            alert("Extension error: " + chrome.runtime.lastError.message);
-            return;
-          }
-
-          if (response && response.prompt) {
-            const inputField = findChatGPTInput();
-            if (inputField) {
-              if (inputField.tagName === "TEXTAREA" || inputField.tagName === "INPUT") {
-                inputField.value = response.prompt;
-                inputField.dispatchEvent(new Event("input", { bubbles: true }));
-              } else if (inputField.contentEditable === "true") {
-                inputField.textContent = response.prompt;
-                inputField.dispatchEvent(new Event("input", { bubbles: true }));
-              }
-
-              inputField.focus();
-              
-              showSuccessMessage();
-              
-              icon.innerHTML = "✅";
-              icon.style.background = "rgba(16, 185, 129, 0.1) !important";
-              icon.style.borderColor = "rgba(16, 185, 129, 0.3) !important";
-              setTimeout(() => {
-                icon.innerHTML = "✨";
-                icon.style.background = "rgba(55, 65, 81, 0.1) !important";
-                icon.style.borderColor = "rgba(209, 213, 219, 0.3) !important";
-              }, 2000);
-              
-              console.log("✅ Prompt enhanced and injected successfully");
-            } else {
-              alert("Could not inject enhanced prompt: No input field found");
-            }
-          } else {
-            alert("Failed to enhance prompt. Please try again.");
-          }
-        }
-      );
-    });
+  const inputField = findChatGPTInput();
+  if (!inputField) {
+    alert("Could not find input field. Please try again.");
+    return;
   }
+
+  const currentText = inputField.tagName === "TEXTAREA" || inputField.tagName === "INPUT"
+    ? inputField.value
+    : inputField.textContent;
+
+  if (!currentText || currentText.trim() === '') {
+    inputField.style.borderColor = '#ef4444';
+    inputField.focus();
+    setTimeout(() => inputField.style.borderColor = '', 2000);
+    return;
+  }
+
+  loadingIndicator.style.display = 'block';
+  icon.style.opacity = '0.4';
+  icon.style.cursor = 'not-allowed';
+  console.log("⏳ Loading state activated");
+  console.log("📝 Current text:", currentText);
+
+  chrome.storage.local.get(["selectedRole", "selectedContextId", "token"], (result) => {
+    const role = result.selectedRole || "Developer";
+    const contextId = result.selectedContextId;
+    const token = result.token;
+    console.log("📤 Sending message with:", { role, contextId, token });
+
+    chrome.runtime.sendMessage(
+      {
+        type: "GENERATE_PROMPT",
+        payload: { role, input: currentText.trim(), context_id: contextId, token },
+      },
+      (response) => {
+        console.log("📥 Response received:", response);
+        loadingIndicator.style.display = 'none';
+        icon.style.opacity = '0.7';
+        icon.style.cursor = 'pointer';
+
+        if (chrome.runtime.lastError) {
+          console.error("❌ Runtime error:", chrome.runtime.lastError);
+          alert("Extension error: " + chrome.runtime.lastError.message);
+          return;
+        }
+
+        if (response && response.prompt) {
+          const inputField = findChatGPTInput();
+          if (inputField) {
+            if (inputField.tagName === "TEXTAREA" || inputField.tagName === "INPUT") {
+              inputField.value = response.prompt;
+              inputField.dispatchEvent(new Event("input", { bubbles: true }));
+            } else if (inputField.contentEditable === "true") {
+              inputField.textContent = response.prompt;
+              inputField.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+            inputField.focus();
+            showSuccessMessage();
+            icon.innerHTML = "✅";
+            icon.style.background = "rgba(16, 185, 129, 0.1) !important";
+            icon.style.borderColor = "rgba(16, 185, 129, 0.3) !important";
+            setTimeout(() => {
+              icon.innerHTML = "✨";
+              icon.style.background = "rgba(55, 65, 81, 0.1) !important";
+              icon.style.borderColor = "rgba(209, 213, 219, 0.3) !important";
+            }, 2000);
+            console.log("✅ Prompt enhanced and injected successfully");
+          } else {
+            alert("Could not inject enhanced prompt: No input field found");
+          }
+        } else {
+          alert("Failed to enhance prompt. Please try again.");
+        }
+      }
+    );
+  });
+}
+
+// [Rest of content.js remains unchanged]
 
   inputContainer.appendChild(icon);
   console.log("🎉 Enhance icon successfully added to input area!");

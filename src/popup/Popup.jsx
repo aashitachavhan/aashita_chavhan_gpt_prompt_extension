@@ -1,54 +1,50 @@
 import { useState, useEffect } from "react";
-import { Save, Check } from "lucide-react";
+import { Save, Check, LogOut } from "lucide-react";
 
 export default function Popup() {
   const [role, setRole] = useState("Developer");
   const [context, setContext] = useState("");
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [userId, setUserId] = useState(null);
   const [contexts, setContexts] = useState([]);
   const [selectedContextId, setSelectedContextId] = useState(null);
+  const [token, setToken] = useState(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLogin, setIsLogin] = useState(true);
+  const [authError, setAuthError] = useState("");
 
-  // Load role, context, userId, and contexts from storage on mount
   useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.get(["selectedRole", "userContext", "userId", "selectedContextId"], (result) => {
+      chrome.storage.local.get(["selectedRole", "userContext", "token", "selectedContextId"], (result) => {
         if (result.selectedRole) setRole(result.selectedRole);
         if (result.userContext) setContext(result.userContext);
-        if (result.userId) setUserId(result.userId);
+        if (result.token) {
+          setToken(result.token);
+          fetchContexts(result.token);
+        }
         if (result.selectedContextId) setSelectedContextId(result.selectedContextId);
-
-        // Generate a new userId if none exists
-        if (!result.userId) {
-          const newUserId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-            const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
-            return v.toString(16);
-          });
-          chrome.storage.local.set({ userId: newUserId }, () => setUserId(newUserId));
-        }
-
-        // Fetch previous contexts
-        if (result.userId) {
-          chrome.runtime.sendMessage(
-            { type: "GET_CONTEXTS", payload: { user_id: result.userId } },
-            (response) => {
-              if (response && response.contexts) {
-                setContexts(response.contexts);
-              }
-            }
-          );
-        }
       });
     }
   }, []);
 
+  const fetchContexts = (authToken) => {
+    chrome.runtime.sendMessage(
+      { type: "GET_CONTEXTS", payload: { token: authToken } },
+      (response) => {
+        if (response && response.contexts) {
+          setContexts(response.contexts);
+        } else {
+          console.error("Failed to fetch contexts:", response?.error);
+        }
+      }
+    );
+  };
+
   const handleRoleChange = (e) => {
     const newRole = e.target.value;
     setRole(newRole);
-    if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.set({ selectedRole: newRole });
-    }
+    chrome.storage.local.set({ selectedRole: newRole });
   };
 
   const handleContextSelect = (e) => {
@@ -62,6 +58,57 @@ export default function Popup() {
     }
   };
 
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setAuthError("");
+    setLoading(true);
+    try {
+      const endpoint = isLogin ? "/login" : "/register";
+      const response = await fetch(`http://127.0.0.1:8000${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Authentication failed");
+
+      let authToken = data.access_token;
+      if (!isLogin) {
+        // After registration, automatically log in
+        const loginResponse = await fetch("http://127.0.0.1:8000/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const loginData = await loginResponse.json();
+        if (!loginResponse.ok) throw new Error(loginData.detail || "Automatic login failed");
+        authToken = loginData.access_token;
+      }
+
+      chrome.storage.local.set({ token: authToken }, () => {
+        setToken(authToken);
+        fetchContexts(authToken);
+        setEmail("");
+        setPassword("");
+        setIsLogin(true); // Reset to login view for next time
+      });
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    chrome.storage.local.remove(["token", "selectedRole", "userContext", "selectedContextId"], () => {
+      setToken(null);
+      setRole("Developer");
+      setContext("");
+      setContexts([]);
+      setSelectedContextId(null);
+    });
+  };
+
   const handleSaveContext = async () => {
     if (!context.trim()) {
       const textarea = document.querySelector('textarea');
@@ -71,51 +118,28 @@ export default function Popup() {
       }
       return;
     }
-
     setLoading(true);
     setSaved(false);
-
     try {
-      // Save to local storage
-      if (typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.local.set({ userContext: context });
-      }
-
-      // Send to backend to save in MongoDB
-      if (typeof chrome !== 'undefined' && chrome.runtime) {
-        chrome.runtime.sendMessage(
-          {
-            type: "SAVE_CONTEXT",
-            payload: { role, context: context.trim(), user_id: userId },
-          },
-          (response) => {
-            setLoading(false);
-            if (response && response.success) {
-              setSaved(true);
-              setTimeout(() => setSaved(false), 3000);
-              // Refresh contexts list
-              chrome.runtime.sendMessage(
-                { type: "GET_CONTEXTS", payload: { user_id: userId } },
-                (response) => {
-                  if (response && response.contexts) {
-                    setContexts(response.contexts);
-                    setSelectedContextId(response.contexts[0]?.context_id);
-                    chrome.storage.local.set({ selectedContextId: response.contexts[0]?.context_id });
-                  }
-                }
-              );
-            } else {
-              console.error('Failed to save context:', response?.error);
-              setSaved(true); // Show success for local save
-              setTimeout(() => setSaved(false), 3000);
-            }
+      chrome.storage.local.set({ userContext: context });
+      chrome.runtime.sendMessage(
+        {
+          type: "SAVE_CONTEXT",
+          payload: { role, context: context.trim(), token },
+        },
+        (response) => {
+          setLoading(false);
+          if (response && response.success) {
+            setSaved(true);
+            setTimeout(() => setSaved(false), 3000);
+            fetchContexts(token);
+          } else {
+            console.error('Failed to save context:', response?.error);
+            setSaved(true);
+            setTimeout(() => setSaved(false), 3000);
           }
-        );
-      } else {
-        setLoading(false);
-        setSaved(true);
-        setTimeout(() => setSaved(false), 3000);
-      }
+        }
+      );
     } catch (err) {
       console.error('Error saving context:', err);
       setLoading(false);
@@ -124,22 +148,64 @@ export default function Popup() {
     }
   };
 
+  if (!token) {
+    return (
+      <div className="min-w-80 max-w-96 bg-white shadow-2xl rounded-lg border border-gray-200 p-4">
+        <h2 className="text-lg font-bold text-center mb-4">{isLogin ? "Login" : "Register"}</h2>
+        <form onSubmit={handleAuth} className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full p-2 border-2 border-gray-300 rounded-lg"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full p-2 border-2 border-gray-300 rounded-lg"
+              required
+            />
+          </div>
+          {authError && <p className="text-red-500 text-xs">{authError}</p>}
+          <button
+            type="submit"
+            className={`w-full py-2 rounded-lg font-semibold text-white ${loading ? "bg-gray-400" : "bg-blue-500 hover:bg-blue-600"}`}
+            disabled={loading}
+          >
+            {loading ? "Processing..." : isLogin ? "Login" : "Register"}
+          </button>
+          <p className="text-center text-xs text-gray-500 mt-2">
+            {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
+            <span
+              className="text-blue-500 cursor-pointer"
+              onClick={() => setIsLogin(!isLogin)}
+            >
+              {isLogin ? "Register" : "Login"}
+            </span>
+          </p>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="min-w-80 max-w-96 bg-white shadow-2xl rounded-lg border border-gray-200">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 rounded-t-lg">
-        <h2 className="text-lg font-bold text-center">
-          ✨ ChatGPT Context Manager
-        </h2>
+      <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 rounded-t-lg flex justify-between items-center">
+        <h2 className="text-lg font-bold">✨ ChatGPT Context Manager</h2>
+        <button onClick={handleLogout} className="text-white hover:text-gray-200" title="Logout">
+          <LogOut size={18} />
+        </button>
       </div>
-
-      {/* Content */}
       <div className="p-4 space-y-4">
-        {/* Role Selection */}
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Select Role
-          </label>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">Select Role</label>
           <select
             className="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200 bg-white text-gray-800"
             value={role}
@@ -155,13 +221,9 @@ export default function Popup() {
             <option value="Data Scientist">📊 Data Scientist</option>
           </select>
         </div>
-
-        {/* Previous Contexts */}
         {contexts.length > 0 && (
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Select Previous Context
-            </label>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Select Previous Context</label>
             <select
               className="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200 bg-white text-gray-800"
               value={selectedContextId || ''}
@@ -176,29 +238,20 @@ export default function Popup() {
             </select>
           </div>
         )}
-
-        {/* Context Input Area */}
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Project Context
-          </label>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">Project Context</label>
           <textarea
             className="w-full h-32 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200 resize-none text-gray-800 placeholder-gray-400"
-            placeholder="Describe your project context here... 
-Example: I'm building a React e-commerce app with Node.js backend, using MongoDB for database. The app needs user authentication, product catalog, shopping cart, and payment integration with Stripe."
+            placeholder="Describe your project context here..."
             value={context}
             onChange={(e) => setContext(e.target.value)}
           />
-          <p className="text-xs text-gray-500 mt-1">
-            This context will be used to enhance all your prompts on ChatGPT
-          </p>
+          <p className="text-xs text-gray-500 mt-1">This context will be used to enhance all your prompts on ChatGPT</p>
         </div>
-
-        {/* Save Context Button */}
         <button
           className={`w-full py-3 px-4 rounded-lg font-semibold text-white transition-all duration-200 flex items-center justify-center gap-2 ${
             loading || !context.trim()
-              ? "bg-gray-400 cursor-not-allowed" 
+              ? "bg-gray-400 cursor-not-allowed"
               : saved
               ? "bg-green-600 hover:bg-green-700"
               : "bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 transform hover:scale-105 shadow-lg"
@@ -218,8 +271,6 @@ Example: I'm building a React e-commerce app with Node.js backend, using MongoDB
             </>
           )}
         </button>
-
-        {/* Status Message */}
         {context.trim() && (
           <div className="border-2 border-blue-200 rounded-lg p-3 bg-blue-50">
             <div className="flex items-center gap-2 text-blue-800">
@@ -231,8 +282,6 @@ Example: I'm building a React e-commerce app with Node.js backend, using MongoDB
             </p>
           </div>
         )}
-
-        {/* Instructions */}
         <div className="border-2 border-green-200 rounded-lg p-3 bg-green-50">
           <div className="flex items-center gap-2 text-green-800 mb-2">
             <span className="text-green-500">🚀</span>
@@ -245,12 +294,8 @@ Example: I'm building a React e-commerce app with Node.js backend, using MongoDB
             <li>4. Your prompt will be enhanced with the selected context!</li>
           </ul>
         </div>
-
-        {/* Footer */}
         <div className="text-center pt-2 border-t border-gray-200">
-          <p className="text-xs text-gray-500">
-            Context and role will be saved automatically
-          </p>
+          <p className="text-xs text-gray-500">Context and role will be saved automatically</p>
         </div>
       </div>
     </div>
