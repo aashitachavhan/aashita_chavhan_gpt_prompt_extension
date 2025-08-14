@@ -17,13 +17,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   });
 
   if (message.type === "SAVE_CONTEXT") {
-    const { role, context, token } = message.payload;
+    const { role, custom_role, persona, context, name, token } = message.payload; // Added name
     console.log("🎯 Saving context");
 
     fetch("http://127.0.0.1:8000/save-context", {
       method: "POST",
       headers: addAuthHeader({}, token),
-      body: JSON.stringify({ role, context }),
+      body: JSON.stringify({ role, custom_role, persona, context, name }), // Include name
     })
       .then((res) => {
         console.log("📡 Backend response status:", res.status);
@@ -68,13 +68,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "GENERATE_PROMPT") {
-    const { role, input, context_id, token } = message.payload;
-    console.log("🎯 Generating prompt with:", { role, input, context_id });
+    const { role, custom_role, persona, input, context_id, token } = message.payload;
+    console.log("🎯 Generating prompt with:", { role, custom_role, persona, input, context_id });
 
     fetch("http://127.0.0.1:8000/generate-prompt", {
       method: "POST",
       headers: addAuthHeader({}, token),
-      body: JSON.stringify({ role, input, context_id }),
+      body: JSON.stringify({ role, custom_role, persona, input, context_id }),
     })
       .then((res) => {
         console.log("📡 Backend response status:", res.status);
@@ -87,7 +87,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .catch((err) => {
         console.error("❌ Backend API Error:", err);
-        sendResponse({ prompt: `${role}: ${input}` });
+        sendResponse({ prompt: `${role}${custom_role ? `: ${custom_role}` : ""}: ${input}` });
       });
 
     return true;

@@ -12,7 +12,6 @@ from pymongo import MongoClient
 from bson import ObjectId
 from passlib.context import CryptContext
 import jwt
-from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -79,12 +78,17 @@ class Token(BaseModel):
 
 class GeneratePromptRequest(BaseModel):
     role: str
+    custom_role: Optional[str] = None
+    persona: Optional[str] = None
     input: str
     context_id: Optional[str] = None
 
 class SaveContextRequest(BaseModel):
     role: str
-    context: str
+    custom_role: Optional[str] = None
+    persona: Optional[str] = None
+    context: Optional[str] = None
+    name: Optional[str] = None  # Added optional name field
 
 class EnhancePromptRequest(BaseModel):
     prompt: str
@@ -177,7 +181,7 @@ def get_user_context(user_id: str, context_id: Optional[str] = None) -> Optional
             context_doc = contexts_collection.find_one({"_id": ObjectId(context_id), "user_id": user_id})
         else:
             context_doc = contexts_collection.find_one({"user_id": user_id}, sort=[("created_at", -1)])
-        if context_doc:
+        if context_doc and context_doc.get("context"):
             print(f"📥 Context retrieved for user: {user_id}, context_id: {context_id or 'latest'}")
             return context_doc.get("context", "")
         else:
@@ -186,8 +190,56 @@ def get_user_context(user_id: str, context_id: Optional[str] = None) -> Optional
         print(f"❌ Error retrieving context from Atlas: {e}")
     return None
 
-async def call_gemini_api(prompt_text: str, role: Optional[str] = None, context: Optional[str] = None) -> str:
-    if role and context:
+async def call_gemini_api(prompt_text: str, role: str, custom_role: Optional[str] = None, persona: Optional[str] = None, context: Optional[str] = None) -> str:
+    effective_role = custom_role if role == "Custom" and custom_role else role
+    if role == "Custom" and persona:
+        system_prompt = f"""You are assisting a user who embodies the persona of {persona}, acting as a {effective_role}. The user is asking the following query{' in the context of their project' if context else ''}. Frame the response as if the user is this persona, using their expertise and perspective to provide a tailored, actionable answer.
+
+Persona: {persona}
+User's Role: {effective_role}
+{'Project Context: ' + context if context else ''}
+User's Query: {prompt_text}
+
+FORMATTING RULES:
+- Use PLAIN TEXT only - NO markdown, stars, backticks, or special characters
+- Structure with clear sections and numbered points for readability
+- Add proper line breaks between sections for visual clarity
+- Make the response conversational, addressing the user as the persona (e.g., 'As an {persona}, you would...')
+- Tailor the response to the persona's expertise{' and project context' if context else ''}
+
+STRUCTURE THE RESPONSE EXACTLY LIKE THIS:
+
+As an {persona}, here's how you can address: [task description]
+
+{'Project Context Integration:' if context else 'Task Overview:'}
+[{'Brief summary of how the query relates to the users project, tailored to the persona' if context else 'Brief description of the task, tailored to the persona'}]
+
+Steps to Follow:
+1. [First specific step leveraging the persona's expertise{' and project context' if context else ''}]
+2. [Second specific step tailored to the persona{' and project context' if context else ''}]
+3. [Third specific step reflecting the persona's perspective]
+4. [Additional steps as needed]
+
+Requirements for you as an {effective_role}:
+1. [Specific requirement tailored to the persona{' and project context' if context else ''}]
+2. [Specific requirement reflecting the persona's expertise]
+3. [Additional requirements]
+
+Expected Output:
+[Clear description of what the {persona} should produce/deliver{' considering the project context' if context else ''}]
+
+Additional Considerations:
+1. [Best practice or tip specific to the persona{' and project context' if context else ''}]
+2. [Another consideration tailored to the persona]
+
+IMPORTANT GUIDELINES:
+- Start with "As an {persona}, here's how you can address:"
+- Address the user directly as the persona throughout the response
+- Make each step actionable and specific to the persona's expertise{' and project context' if context else ''}
+- {'Reference technologies tools mentioned in the project context' if context else 'Include relevant technologies tools for the persona'}
+- Keep sections well-spaced with line breaks
+- No markdown formatting - just clean, structured text"""
+    elif role and context:
         system_prompt = f"""You are an expert AI assistant. Create a personalized, comprehensive prompt for a {role} based on their query and project context.
 
 User's Role: {role}
@@ -249,6 +301,9 @@ FORMATTING RULES:
 STRUCTURE THE RESPONSE EXACTLY LIKE THIS:
 
 As a {role}, here's what you need to do for: [task description]
+
+Task Overview:
+[Brief description of the task, tailored to the role]
 
 Steps to Follow:
 1. [First specific step for this role]
@@ -317,7 +372,9 @@ Make it comprehensive, actionable, and well-formatted with clear sections and pr
             data = response.json()
             enhanced_text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
             if not enhanced_text:
-                fallback = f"You are a {role}. " if role else ""
+                fallback = f"You are a {effective_role}. " if effective_role else ""
+                if persona:
+                    fallback += f"Persona: {persona}. "
                 if context:
                     fallback += f"Project context: {context}. "
                 fallback += f"Please help me with: {prompt_text}"
@@ -326,14 +383,18 @@ Make it comprehensive, actionable, and well-formatted with clear sections and pr
             return cleaned_text.strip()
     except httpx.TimeoutException:
         print("Gemini API timeout")
-        fallback = f"You are a {role}. " if role else ""
+        fallback = f"You are a {effective_role}. " if effective_role else ""
+        if persona:
+            fallback += f"Persona: {persona}. "
         if context:
             fallback += f"Project context: {context}. "
         fallback += f"Please help me with: {prompt_text}"
         return fallback
     except Exception as e:
         print(f"Gemini API error: {e}")
-        fallback = f"You are a {role}. " if role else ""
+        fallback = f"You are a {effective_role}. " if effective_role else ""
+        if persona:
+            fallback += f"Persona: {persona}. "
         if context:
             fallback += f"Project context: {context}. "
         fallback += f"Please help me with: {prompt_text}"
@@ -377,7 +438,10 @@ async def save_context(request: SaveContextRequest, current_user: dict = Depends
         context_data = {
             "user_id": current_user["user_id"],
             "role": request.role,
+            "custom_role": request.custom_role,
+            "persona": request.persona,
             "context": request.context,
+            "name": request.name,  # Added name field
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
@@ -393,7 +457,7 @@ async def save_context(request: SaveContextRequest, current_user: dict = Depends
 async def generate_prompt(request: GeneratePromptRequest, current_user: dict = Depends(get_current_user)):
     try:
         context = get_user_context(current_user["user_id"], request.context_id)
-        enhanced_prompt = await call_gemini_api(request.input, request.role, context)
+        enhanced_prompt = await call_gemini_api(request.input, request.role, request.custom_role, request.persona, context)
         return PromptResponse(prompt=enhanced_prompt)
     except Exception as e:
         print(f"❌ Error generating prompt: {e}")
@@ -416,7 +480,10 @@ async def get_contexts(current_user: dict = Depends(get_current_user)):
             {
                 "context_id": str(doc["_id"]),
                 "role": doc["role"],
-                "context": doc["context"],
+                "custom_role": doc.get("custom_role"),
+                "persona": doc.get("persona"),
+                "context": doc.get("context"),
+                "name": doc.get("name"),  # Added name field
                 "created_at": doc["created_at"].isoformat()
             }
             for doc in context_docs
