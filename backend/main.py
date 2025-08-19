@@ -117,7 +117,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+        # Extended to 7 days instead of 15 minutes
+        expire = datetime.utcnow() + timedelta(days=7)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return encoded_jwt
@@ -132,6 +133,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
         return {"user_id": str(user["_id"]), "email": user["email"]}
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
     except jwt.PyJWTError as e:
         raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
 
@@ -425,7 +428,9 @@ async def login_user(user: UserLogin):
         db_user = users_collection.find_one({"email": user.email})
         if not db_user or not verify_password(user.password, db_user["hashed_password"]):
             raise HTTPException(status_code=401, detail="Invalid credentials")
-        access_token_expires = timedelta(minutes=30)
+        
+        # Extended token expiration to 7 days
+        access_token_expires = timedelta(days=7)
         access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
         print(f"✅ User logged in: {user.email}")
         return {"access_token": access_token, "token_type": "bearer"}
@@ -538,6 +543,11 @@ async def test_endpoint():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "message": "Backend is running"}
+
+@app.get("/verify-token")
+async def verify_token(current_user: dict = Depends(get_current_user)):
+    """Endpoint to verify if token is still valid"""
+    return {"valid": True, "user": current_user}
 
 if __name__ == "__main__":
     import uvicorn

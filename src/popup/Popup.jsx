@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Check, LogOut, Settings } from "lucide-react";
+import { Save, Check, LogOut, Settings, RefreshCw } from "lucide-react";
 
 export default function Popup() {
   const [role, setRole] = useState("Developer");
@@ -16,53 +16,151 @@ export default function Popup() {
   const [password, setPassword] = useState("");
   const [isLogin, setIsLogin] = useState(true);
   const [authError, setAuthError] = useState("");
+  const [isInitializing, setIsInitializing] = useState(true);
 
+  // Auto-login and token validation on component mount
   useEffect(() => {
-    if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.get(["selectedRole", "customRole", "persona", "userContext", "contextName", "token", "selectedContextId"], (result) => {
-        if (result.selectedRole) setRole(result.selectedRole);
-        if (result.customRole) setCustomRole(result.customRole);
-        if (result.persona) setPersona(result.persona);
-        if (result.userContext) setContext(result.userContext);
-        if (result.contextName) setContextName(result.contextName);
-        if (result.token) {
-          setToken(result.token);
-          fetchContexts(result.token);
-        }
-        if (result.selectedContextId) setSelectedContextId(result.selectedContextId);
-      });
-    }
+    initializeAuth();
   }, []);
 
-  const fetchContexts = (authToken) => {
-    chrome.runtime.sendMessage(
-      { type: "GET_CONTEXTS", payload: { token: authToken } },
-      (response) => {
-        if (response && response.success && response.contexts) {
-          setContexts(response.contexts);
-          if (response.contexts.length > 0 && !selectedContextId) {
-            const latestContext = response.contexts[0];
-            setSelectedContextId(latestContext.context_id);
-            setRole(latestContext.role);
-            setCustomRole(latestContext.custom_role || "");
-            setPersona(latestContext.persona || "");
-            setContext(latestContext.context || "");
-            setContextName(latestContext.name || "");
-            chrome.storage.local.set({
-              selectedRole: latestContext.role,
-              customRole: latestContext.custom_role || "",
-              persona: latestContext.persona || "",
-              userContext: latestContext.context || "",
-              contextName: latestContext.name || "",
-              selectedContextId: latestContext.context_id,
-            });
-          }
+  const initializeAuth = async () => {
+    setIsInitializing(true);
+    
+    try {
+      const result = await new Promise((resolve) => {
+        chrome.storage.local.get([
+          "selectedRole", "customRole", "persona", "userContext", 
+          "contextName", "token", "selectedContextId", "userEmail", "userPassword"
+        ], resolve);
+      });
+
+      // Load saved data
+      if (result.selectedRole) setRole(result.selectedRole);
+      if (result.customRole) setCustomRole(result.customRole);
+      if (result.persona) setPersona(result.persona);
+      if (result.userContext) setContext(result.userContext);
+      if (result.contextName) setContextName(result.contextName);
+      if (result.selectedContextId) setSelectedContextId(result.selectedContextId);
+
+      // Try to validate existing token
+      if (result.token) {
+        const isValidToken = await validateToken(result.token);
+        if (isValidToken) {
+          setToken(result.token);
+          await fetchContexts(result.token);
+          setIsInitializing(false);
+          return;
         } else {
-          console.error("Failed to fetch contexts:", response?.error);
-          setContexts([]);
+          console.log("Token expired or invalid, attempting auto-login");
+          // Clear invalid token
+          chrome.storage.local.remove(["token"]);
         }
       }
-    );
+
+      // Try auto-login if credentials are saved
+      if (result.userEmail && result.userPassword) {
+        console.log("Attempting auto-login with saved credentials");
+        const loginSuccess = await attemptAutoLogin(result.userEmail, result.userPassword);
+        if (loginSuccess) {
+          setIsInitializing(false);
+          return;
+        }
+      }
+
+      // No valid token and no saved credentials
+      setIsInitializing(false);
+    } catch (error) {
+      console.error("Error during initialization:", error);
+      setIsInitializing(false);
+    }
+  };
+
+  const validateToken = async (authToken) => {
+    try {
+      const response = await fetch("http://127.0.0.1:8000/get-contexts", {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${authToken}`
+        },
+      });
+      return response.ok;
+    } catch (error) {
+      console.error("Token validation failed:", error);
+      return false;
+    }
+  };
+
+  const attemptAutoLogin = async (savedEmail, savedPassword) => {
+    try {
+      const response = await fetch("http://127.0.0.1:8000/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: savedEmail, password: savedPassword }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const authToken = data.access_token;
+        
+        // Store token and update state
+        await new Promise((resolve) => {
+          chrome.storage.local.set({ token: authToken }, resolve);
+        });
+        
+        setToken(authToken);
+        await fetchContexts(authToken);
+        console.log("Auto-login successful");
+        return true;
+      } else {
+        console.log("Auto-login failed - invalid credentials");
+        // Remove saved credentials if they're no longer valid
+        chrome.storage.local.remove(["userEmail", "userPassword"]);
+        return false;
+      }
+    } catch (error) {
+      console.error("Auto-login error:", error);
+      return false;
+    }
+  };
+
+  const fetchContexts = async (authToken) => {
+    try {
+      const response = await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          { type: "GET_CONTEXTS", payload: { token: authToken } },
+          resolve
+        );
+      });
+
+      if (response && response.success && response.contexts) {
+        setContexts(response.contexts);
+        if (response.contexts.length > 0 && !selectedContextId) {
+          const latestContext = response.contexts[0];
+          setSelectedContextId(latestContext.context_id);
+          setRole(latestContext.role);
+          setCustomRole(latestContext.custom_role || "");
+          setPersona(latestContext.persona || "");
+          setContext(latestContext.context || "");
+          setContextName(latestContext.name || "");
+          
+          chrome.storage.local.set({
+            selectedRole: latestContext.role,
+            customRole: latestContext.custom_role || "",
+            persona: latestContext.persona || "",
+            userContext: latestContext.context || "",
+            contextName: latestContext.name || "",
+            selectedContextId: latestContext.context_id,
+          });
+        }
+      } else {
+        console.error("Failed to fetch contexts:", response?.error);
+        setContexts([]);
+      }
+    } catch (error) {
+      console.error("Error fetching contexts:", error);
+      setContexts([]);
+    }
   };
 
   const handleRoleChange = (e) => {
@@ -149,7 +247,12 @@ export default function Popup() {
         authToken = loginData.access_token;
       }
 
-      chrome.storage.local.set({ token: authToken }, () => {
+      // Save credentials for auto-login and store token
+      chrome.storage.local.set({ 
+        token: authToken,
+        userEmail: email,
+        userPassword: password // Note: In production, you might want to hash this or use a more secure method
+      }, () => {
         setToken(authToken);
         fetchContexts(authToken);
         setEmail("");
@@ -164,7 +267,11 @@ export default function Popup() {
   };
 
   const handleLogout = () => {
-    chrome.storage.local.remove(["token", "selectedRole", "customRole", "persona", "userContext", "contextName", "selectedContextId"], () => {
+    chrome.storage.local.remove([
+      "token", "selectedRole", "customRole", "persona", 
+      "userContext", "contextName", "selectedContextId", 
+      "userEmail", "userPassword"
+    ], () => {
       setToken(null);
       setRole("Developer");
       setCustomRole("");
@@ -173,7 +280,19 @@ export default function Popup() {
       setContextName("");
       setContexts([]);
       setSelectedContextId(null);
+      setEmail("");
+      setPassword("");
     });
+  };
+
+  const handleRefresh = async () => {
+    if (token) {
+      setLoading(true);
+      await fetchContexts(token);
+      setLoading(false);
+    } else {
+      initializeAuth();
+    }
   };
 
   const handleSaveContext = async () => {
@@ -197,7 +316,15 @@ export default function Popup() {
       chrome.runtime.sendMessage(
         {
           type: "SAVE_CONTEXT",
-          payload: { role, custom_role: role === "Custom" ? customRole : null, persona: role === "Custom" ? persona : null, context: context.trim() || null, name: contextName.trim() || null, context_id: selectedContextId, token },
+          payload: { 
+            role, 
+            custom_role: role === "Custom" ? customRole : null, 
+            persona: role === "Custom" ? persona : null, 
+            context: context.trim() || null, 
+            name: contextName.trim() || null, 
+            context_id: selectedContextId, 
+            token 
+          },
         },
         (response) => {
           setLoading(false);
@@ -228,6 +355,18 @@ export default function Popup() {
     chrome.tabs.create({ url: chrome.runtime.getURL('settings.html') });
   };
 
+  // Show loading screen during initialization
+  if (isInitializing) {
+    return (
+      <div className="min-w-80 max-w-96 bg-white shadow-2xl rounded-lg border border-gray-200 p-6">
+        <div className="flex items-center justify-center py-8">
+          <RefreshCw className="animate-spin mr-2" size={24} />
+          <span>Initializing...</span>
+        </div>
+      </div>
+    );
+  }
+
   if (!token) {
     return (
       <div className="min-w-80 max-w-96 bg-white shadow-2xl rounded-lg border border-gray-200 p-6">
@@ -245,71 +384,7 @@ export default function Popup() {
             cursor: not-allowed;
             opacity: 0.7;
           }
-          .custom-select {
-            appearance: none;
-            background-image: url('data:image/svg+xml;utf8,<svg fill="none" stroke="%236B7280" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"></path></svg>');
-            background-repeat: no-repeat;
-            background-position: right 0.75rem center;
-            background-size: 1.2rem;
-            padding-right: 2.5rem;
-            transition: all 0.2s ease-in-out;
-            width: 100% !important;
-            min-width: 0;
-            max-width: 100%;
-          }
-          .custom-select option {
-            padding: 0.5rem;
-            background-color: #FFFFFF;
-            color: #1F2937;
-            font-size: 0.9rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 100%;
-          }
-          .custom-select:focus {
-            border-color: #3B82F6;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-            background-image: url('data:image/svg+xml;utf8,<svg fill="none" stroke="%233B82F6" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"></path></svg>');
-            width: 100% !important;
-          }
-          .custom-select:hover {
-            border-color: #3B82F6;
-            background-color: #F9FAFB;
-            width: 100% !important;
-          }
-          .custom-select option:checked {
-            background-color: #EFF6FF;
-            color: #1E40AF;
-            font-weight: 500;
-          }
-          .logout-button {
-            padding: 0.5rem;
-            border-radius: 0.5rem;
-            transition: all 0.2s ease-in-out;
-          }
-          .logout-button:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-            transform: scale(1.1);
-          }
-          .save-button {
-            transition: all 0.2s ease-in-out;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-          }
-          .save-button:hover:not(:disabled) {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
-            background-image: linear-gradient(to right, #2563EB, #7C3AED);
-          }
-          .save-button:disabled {
-            cursor: not-allowed;
-            opacity: 0.7;
-          }
           .input-field:hover {
-            border-color: #3B82F6;
-            background-color: #F9FAFB;
-          }
-          .textarea-field:hover {
             border-color: #3B82F6;
             background-color: #F9FAFB;
           }
@@ -451,6 +526,14 @@ export default function Popup() {
       <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 rounded-t-lg flex justify-between items-center">
         <h2 className="text-lg font-bold">✨ ChatGPT Prompt Enhancer</h2>
         <div className="flex gap-2">
+          <button
+            onClick={handleRefresh}
+            className="text-white logout-button"
+            title="Refresh Contexts"
+            disabled={loading}
+          >
+            <RefreshCw size={20} color="#fff" strokeWidth={2.5} className={loading ? "animate-spin" : ""}/>
+          </button>
           <button
             onClick={openSettings}
             className="text-white logout-button"
