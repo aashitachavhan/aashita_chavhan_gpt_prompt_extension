@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Check, LogOut } from "lucide-react";
+import { Save, Check, LogOut, Settings } from "lucide-react";
 
 export default function Popup() {
   const [role, setRole] = useState("Developer");
@@ -197,7 +197,7 @@ export default function Popup() {
       chrome.runtime.sendMessage(
         {
           type: "SAVE_CONTEXT",
-          payload: { role, custom_role: role === "Custom" ? customRole : null, persona: role === "Custom" ? persona : null, context: context.trim() || null, name: contextName.trim() || null, token },
+          payload: { role, custom_role: role === "Custom" ? customRole : null, persona: role === "Custom" ? persona : null, context: context.trim() || null, name: contextName.trim() || null, context_id: selectedContextId, token },
         },
         (response) => {
           setLoading(false);
@@ -205,8 +205,10 @@ export default function Popup() {
             setSaved(true);
             setTimeout(() => setSaved(false), 3000);
             fetchContexts(token);
-            setSelectedContextId(response.context_id);
-            chrome.storage.local.set({ selectedContextId: response.context_id });
+            if (!selectedContextId) {
+              setSelectedContextId(response.context_id);
+              chrome.storage.local.set({ selectedContextId: response.context_id });
+            }
           } else {
             console.error('Failed to save context:', response?.error);
             setSaved(true);
@@ -220,6 +222,10 @@ export default function Popup() {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     }
+  };
+
+  const openSettings = () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('settings.html') });
   };
 
   if (!token) {
@@ -240,42 +246,38 @@ export default function Popup() {
             opacity: 0.7;
           }
           .custom-select {
-  appearance: none;
-  background-image: url('data:image/svg+xml;utf8,<svg fill="none" stroke="%236B7280" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"></path></svg>');
-  background-repeat: no-repeat;
-  background-position: right 0.75rem center;
-  background-size: 1.2rem;
-  padding-right: 2.5rem;
-  transition: all 0.2s ease-in-out;
-  width: 100% !important;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.custom-select option {
-  padding: 0.5rem;
-  background-color: #FFFFFF;
-  color: #1F2937;
-  font-size: 0.9rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-
-/* Force the dropdown to stay within container */
-.custom-select:focus {
-  border-color: #3B82F6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-  background-image: url('data:image/svg+xml;utf8,<svg fill="none" stroke="%233B82F6" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"></path></svg>');
-  width: 100% !important;
-}
-
-.custom-select:hover {
-  border-color: #3B82F6;
-  background-color: #F9FAFB;
-  width: 100% !important;
-}
+            appearance: none;
+            background-image: url('data:image/svg+xml;utf8,<svg fill="none" stroke="%236B7280" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"></path></svg>');
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            background-size: 1.2rem;
+            padding-right: 2.5rem;
+            transition: all 0.2s ease-in-out;
+            width: 100% !important;
+            min-width: 0;
+            max-width: 100%;
+          }
+          .custom-select option {
+            padding: 0.5rem;
+            background-color: #FFFFFF;
+            color: #1F2937;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+          }
+          .custom-select:focus {
+            border-color: #3B82F6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+            background-image: url('data:image/svg+xml;utf8,<svg fill="none" stroke="%233B82F6" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"></path></svg>');
+            width: 100% !important;
+          }
+          .custom-select:hover {
+            border-color: #3B82F6;
+            background-color: #F9FAFB;
+            width: 100% !important;
+          }
           .custom-select option:checked {
             background-color: #EFF6FF;
             color: #1E40AF;
@@ -407,21 +409,21 @@ export default function Popup() {
           transform: scale(1.1);
         }
         .save-button {
-        transition: all 0.3s ease-in-out;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-      }
-      .save-button:hover:not(:disabled) {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-      }
-      .save-button:disabled {
-        cursor: not-allowed;
-        opacity: 0.6;
-      }
+          transition: all 0.3s ease-in-out;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+        }
+        .save-button:hover:not(:disabled) {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+        .save-button:disabled {
+          cursor: not-allowed;
+          opacity: 0.6;
+        }
         .input-field:hover {
           border-color: #3B82F6;
           background-color: #F9FAFB;
@@ -431,8 +433,8 @@ export default function Popup() {
           background-color: #F9FAFB;
         }
         .context-dropdown {
-          max-height: 100px; /* Fixed height for scrolling */
-          overflow-y: auto; /* Enable vertical scrolling */
+          max-height: 100px;
+          overflow-y: auto;
           width: 100%;
           max-width: 100%;
           min-width: 100%;
@@ -448,13 +450,22 @@ export default function Popup() {
       `}</style>
       <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 rounded-t-lg flex justify-between items-center">
         <h2 className="text-lg font-bold">✨ ChatGPT Prompt Enhancer</h2>
-        <button
-          onClick={handleLogout}
-          className="text-white logout-button"
-          title="Logout"
-        >
-          <LogOut size={20} color="#fff" strokeWidth={2.5}/>
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={openSettings}
+            className="text-white logout-button"
+            title="Settings"
+          >
+            <Settings size={20} color="#fff" strokeWidth={2.5}/>
+          </button>
+          <button
+            onClick={handleLogout}
+            className="text-white logout-button"
+            title="Logout"
+          >
+            <LogOut size={20} color="#fff" strokeWidth={2.5}/>
+          </button>
+        </div>
       </div>
       <div className="p-6 space-y-4">
         <div>

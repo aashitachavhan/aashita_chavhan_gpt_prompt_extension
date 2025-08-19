@@ -88,7 +88,8 @@ class SaveContextRequest(BaseModel):
     custom_role: Optional[str] = None
     persona: Optional[str] = None
     context: Optional[str] = None
-    name: Optional[str] = None  # Added optional name field
+    name: Optional[str] = None
+    context_id: Optional[str] = None  # Added for update
 
 class EnhancePromptRequest(BaseModel):
     prompt: str
@@ -441,13 +442,23 @@ async def save_context(request: SaveContextRequest, current_user: dict = Depends
             "custom_role": request.custom_role,
             "persona": request.persona,
             "context": request.context,
-            "name": request.name,  # Added name field
-            "created_at": datetime.utcnow(),
+            "name": request.name,
             "updated_at": datetime.utcnow()
         }
-        result = contexts_collection.insert_one(context_data)
-        context_id = str(result.inserted_id)
-        print(f"💾 Context saved for user: {current_user['user_id']}, context_id: {context_id}")
+        if request.context_id:
+            result = contexts_collection.update_one(
+                {"_id": ObjectId(request.context_id), "user_id": current_user["user_id"]},
+                {"$set": context_data}
+            )
+            if result.matched_count == 0:
+                return ContextResponse(success=False, message="Context not found or not owned by user")
+            context_id = request.context_id
+            print(f"💾 Context updated for user: {current_user['user_id']}, context_id: {context_id}")
+        else:
+            context_data["created_at"] = datetime.utcnow()
+            result = contexts_collection.insert_one(context_data)
+            context_id = str(result.inserted_id)
+            print(f"💾 Context saved for user: {current_user['user_id']}, context_id: {context_id}")
         return ContextResponse(success=True, message="Context saved successfully", context_id=context_id)
     except Exception as e:
         print(f"❌ Error saving context: {e}")
@@ -483,7 +494,7 @@ async def get_contexts(current_user: dict = Depends(get_current_user)):
                 "custom_role": doc.get("custom_role"),
                 "persona": doc.get("persona"),
                 "context": doc.get("context"),
-                "name": doc.get("name"),  # Added name field
+                "name": doc.get("name"),
                 "created_at": doc["created_at"].isoformat()
             }
             for doc in context_docs
@@ -493,6 +504,18 @@ async def get_contexts(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         print(f"❌ Error retrieving contexts: {e}")
         raise HTTPException(status_code=500, detail=f"Error retrieving contexts: {str(e)}")
+
+@app.delete("/delete-context/{context_id}")
+async def delete_context(context_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        result = contexts_collection.delete_one({"_id": ObjectId(context_id), "user_id": current_user["user_id"]})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Context not found or not owned by user")
+        print(f"🗑️ Context deleted for user: {current_user['user_id']}, context_id: {context_id}")
+        return {"success": True, "message": "Context deleted successfully"}
+    except Exception as e:
+        print(f"❌ Error deleting context: {e}")
+        raise HTTPException(status_code=500, detail=f"Error deleting context: {str(e)}")
 
 @app.get("/test")
 async def test_endpoint():

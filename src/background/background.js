@@ -17,13 +17,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   });
 
   if (message.type === "SAVE_CONTEXT") {
-    const { role, custom_role, persona, context, name, token } = message.payload; // Added name
+    const { role, custom_role, persona, context, name, context_id, token } = message.payload; // Added context_id
     console.log("🎯 Saving context");
 
     fetch("http://127.0.0.1:8000/save-context", {
       method: "POST",
       headers: addAuthHeader({}, token),
-      body: JSON.stringify({ role, custom_role, persona, context, name }), // Include name
+      body: JSON.stringify({ role, custom_role, persona, context, name, context_id }), // Include context_id
     })
       .then((res) => {
         console.log("📡 Backend response status:", res.status);
@@ -67,6 +67,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "DELETE_CONTEXT") {
+    const { context_id, token } = message.payload;
+    console.log("🎯 Deleting context:", context_id);
+
+    fetch(`http://127.0.0.1:8000/delete-context/${context_id}`, {
+      method: "DELETE",
+      headers: addAuthHeader({}, token),
+    })
+      .then((res) => {
+        console.log("📡 Backend response status:", res.status);
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        console.log("✅ Context deleted:", data);
+        sendResponse(data);
+      })
+      .catch((err) => {
+        console.error("❌ Backend API Error:", err);
+        sendResponse({ success: false, error: err.message });
+      });
+
+    return true;
+  }
+
   if (message.type === "GENERATE_PROMPT") {
     const { role, custom_role, persona, input, context_id, token } = message.payload;
     console.log("🎯 Generating prompt with:", { role, custom_role, persona, input, context_id });
@@ -94,13 +119,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "ENHANCE_PROMPT") {
-    const { payload: userInput, token } = message.payload;
-    console.log("🔧 Enhancing prompt:", userInput);
+    const { prompt, token } = message; // Adjusted to match the payload structure
+    console.log("🔧 Enhancing prompt:", prompt);
 
     fetch("http://127.0.0.1:8000/enhance-prompt", {
       method: "POST",
       headers: addAuthHeader({}, token),
-      body: JSON.stringify({ prompt: userInput }),
+      body: JSON.stringify({ prompt }),
     })
       .then((res) => {
         console.log("📡 Backend response status:", res.status);
@@ -113,7 +138,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .catch((err) => {
         console.error("❌ Enhancement API Error:", err);
-        sendResponse({ prompt: userInput });
+        sendResponse({ prompt });
       });
 
     return true;
